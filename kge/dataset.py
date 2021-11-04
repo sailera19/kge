@@ -41,18 +41,18 @@ class Dataset(Configurable):
 
         # read the number of entities and relations from the config, if present
         try:
-            self._num_entities: Int = config.get("dataset.num_entities")
+            self._num_entities: int = config.get("dataset.num_entities")
             if self._num_entities < 0:
                 self._num_entities = None
         except KeyError:
-            self._num_entities: Int = None
+            self._num_entities: int = None
 
         try:
-            self._num_relations: Int = config.get("dataset.num_relations")
+            self._num_relations: int = config.get("dataset.num_relations")
             if self._num_relations < 0:
                 self._num_relations = None
         except KeyError:
-            self._num_relations: Int = None
+            self._num_relations: int = None
 
         #: split-name to (n,3) int32 tensor
         self._triples: Dict[str, Tensor] = {}
@@ -62,6 +62,9 @@ class Dataset(Configurable):
 
         #: data derived automatically from the splits or meta data. Indexed by key.
         self._indexes: Dict[str, Any] = {}
+
+        #: entity id to (n,3) tensor of graph neighborhood
+        self._context_map: List[torch.Tensor] = []
 
         #: functions that compute and add indexes as needed; arguments are dataset and
         #: key. Index functions are expected to not recompute an index that is already
@@ -96,7 +99,7 @@ class Dataset(Configurable):
 
         """
         name = config.get("dataset.name")
-            
+
         root_modules = list(set(m.split(".")[0] for m in config.get("modules")))
         if folder is None:
             for m in root_modules:
@@ -571,3 +574,26 @@ NOT RECOMMENDED: You can update the timestamp of all cached files using:
         """
         map_ = self.load_map(key, as_list=True)
         return Dataset._map_indexes(indexes, map_)
+
+    def load_context_map(self, key):
+        if self._context_map:
+            return self._context_map
+
+        triples = self.load_triples(key)
+
+        result = []
+        for entity_id in range(self.num_entities()):
+            mask_s = triples[:, 2] == entity_id
+            filtered_results_s = triples[mask_s]
+            mask_o = triples[:, 0] == entity_id
+            filtered_results_o = triples[mask_o]
+            filtered_results_o = filtered_results_o.flip(1)
+            filtered_results_o[:, 1] += self.num_relations()
+            filtered_results = torch.cat((filtered_results_s, filtered_results_o), 0)
+            result.append(filtered_results[:, :2])
+
+        self._context_map = result
+        print("halt")
+        return self._context_map
+
+

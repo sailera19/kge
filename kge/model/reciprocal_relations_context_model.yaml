@@ -1,0 +1,8 @@
+import: [conve]
+
+reciprocal_relations_context_model:
+  class_name: ReciprocalRelationsContextModel
+  neighborhood_size: 12
+  base_model:
+    type: conve
+    +++: +++
