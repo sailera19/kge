@@ -1,0 +1,54 @@
+job.type: train
+dataset.name: fb15k-237
+
+#model: reciprocal_relations_model
+#reciprocal_relations_model.base_model.type: transformer # redundant since also default
+
+
+model: reciprocal_relations_context_model
+reciprocal_relations_context_model.base_model.type: hitter # redundant since also default
+reciprocal_relations_context_model.neighborhood_size: 12
+reciprocal_relations_context_model.base_model.neighborhood_size: 0
+reciprocal_relations_context_model.base_model.encoder.dropout: 0.1
+reciprocal_relations_context_model.base_model.scoring_fraction_masked: 0.1
+#reciprocal_relations_context_model.base_model.encoder.context_encoder.num_layers: 6
+
+train:
+  batch_size: 512
+  loss_arg: 1.0
+  lr_warmup: 50
+  lr_scheduler: LinearLR
+  lr_scheduler_args:
+    start_factor: 1
+    end_factor: 0
+    total_iters: 450
+  max_epochs: 500
+  optimizer_args:
+    lr: 0.01
+  type: 1vsAllMaskedEntityPrediction
+
+valid:
+  early_stopping:
+    patience: 5
+  every: 5
+  metric: mean_reciprocal_rank_filtered_with_test
+
+lookup_embedder:
+  dim: 320
+  initialize: xavier_normal_
+  dropout: 0.6
+
+#conve:
+#  feature_map_dropout: 0.48769345636955713
+#  projection_dropout: 0.5
+#  relation_embedder:
+#    dropout: 0.11757230155305998
+#    regularize_weight: 2.231687936571624e-14
+#  round_dim: true
+
+1vsAllMaskedEntityPrediction:
+  entity_prediction_fraction: 0.5
+  entity_prediction_fraction_replaced: 0.1
+  entity_prediction_fraction_unchanged: 0.1
+  scoring_fraction_replaced: 0.1
+  scoring_fraction_unchanged: 0.8
