@@ -26,7 +26,7 @@ class HitterScorer(RelationalScorer):
 
     """
 
-    def __init__(self, config: Config, dataset: Dataset, configuration_key=None):
+    def __init__(self, config: Config, dataset: Dataset, configuration_key=None, embedding_weights=None):
         super().__init__(config, dataset, configuration_key)
         self.emb_dim = self.get_option("entity_embedder.dim")
 
@@ -45,6 +45,10 @@ class HitterScorer(RelationalScorer):
         self.initialize(self.src_type_emb)
         self.context_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.context_type_emb)
+
+        # masked entity prediction embeddings
+        self.mask_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.mask_emb)
 
         dropout = self.get_option("encoder.dropout")
         if dropout < 0.0:
@@ -99,8 +103,14 @@ class HitterScorer(RelationalScorer):
                 self.initialize(layer.self_attn.k_proj_weight)
                 self.initialize(layer.self_attn.v_proj_weight)
 
+        self.entity_prediction_layer = torch.nn.Linear(in_features=self.emb_dim, out_features=dataset.num_entities())
+
+    def set_masked_entity_prediction_weights(self, weights):
+        self.entity_prediction_layer.weight = weights
+
     def score_emb(
-            self, s_emb: Tensor, p_emb: Tensor, o_emb: Tensor, context_s_emb: Tensor, context_p_emb: Tensor, combine: str
+            self, s_emb: Tensor, p_emb: Tensor, o_emb: Tensor, context_s_emb: Tensor, context_p_emb: Tensor,
+            combine: str, num_replaced=0, num_unchanged=0
     ):
         """
 
@@ -128,6 +138,8 @@ class HitterScorer(RelationalScorer):
         context_s_dim = context_s_emb.shape[2]
         context_p_dim = context_p_emb.shape[2]
 
+        s_emb[num_replaced + num_unchanged:] = self.mask_emb
+
         entity_out = self.entity_encoder.forward(
             torch.stack(
                 (
@@ -140,23 +152,6 @@ class HitterScorer(RelationalScorer):
             )
 
         entity_out = torch.transpose(entity_out[0, :].view((batch_size, context_size + 1, context_s_dim)), 0, 1)
-
-        #entity_out = self.entity_encoder.forward(
-        #    torch.stack(
-        #        (
-        #            self.cls_emb.repeat((batch_size * (1), 1)),
-        #            torch.cat([s_emb.view(batch_size, 1, context_s_dim)], dim=1).view(
-        #                (batch_size * (1), context_s_dim)) + self.sub_type_emb.unsqueeze(0),
-        #            torch.cat([p_emb.view(batch_size, 1, context_p_dim)], dim=1).view(
-        #                (batch_size * (1), context_p_dim)) + self.rel_type_emb.unsqueeze(0),
-        #        ),
-        #        dim=0,
-        #    )
-        #)
-        #entity_out = entity_out[0, ::]
-
-        #entity_out[0] += self.src_type_emb
-        #entity_out[1:] += self.context_type_emb
 
         out = self.context_encoder.forward(
             torch.cat([self.gcls_emb.repeat((batch_size, 1)).unsqueeze(0), entity_out])
@@ -174,6 +169,49 @@ class HitterScorer(RelationalScorer):
 
         # all done
         return out.view(batch_size, -1)
+
+    def recover_entity_emb(self, s_emb, p_emb, context_s_emb, context_p_emb, num_replaced=0, num_unchanged=0):
+        """
+        recovers labels
+        Args:
+            s_emb:
+            p_emb:
+            context_s_emb:
+            context_p_emb:
+
+        Returns:
+            tensor of labels
+        """
+
+        batch_size = len(s_emb)
+        context_size = context_s_emb.shape[1]
+        context_s_dim = context_s_emb.shape[2]
+        context_p_dim = context_p_emb.shape[2]
+
+        s_emb[num_replaced + num_unchanged:] = self.mask_emb
+
+        entity_out = self.entity_encoder.forward(
+            torch.stack(
+                (
+                    self.cls_emb.repeat((batch_size * (context_size + 1), 1)),
+                    torch.cat([s_emb.view(batch_size, 1, context_s_dim), context_s_emb], dim=1).view((batch_size * (context_size + 1), context_s_dim)) + self.sub_type_emb.unsqueeze(0),
+                    torch.cat([p_emb.view(batch_size, 1, context_p_dim), context_p_emb], dim=1).view((batch_size * (context_size + 1), context_p_dim)) + self.rel_type_emb.unsqueeze(0),
+                ),
+                dim=0,
+                )
+            )
+
+        entity_out = torch.transpose(entity_out[0, :].view((batch_size, context_size + 1, context_s_dim)), 0, 1)
+
+        out = self.context_encoder.forward(
+            torch.cat([self.gcls_emb.repeat((batch_size, 1)).unsqueeze(0), entity_out])
+            )
+
+        out = out[1, ::]
+
+        out = self.entity_prediction_layer.forward(out)
+
+        return out
 
 
 class Hitter(KgeModel):
@@ -194,6 +232,7 @@ class Hitter(KgeModel):
             configuration_key=self.configuration_key,
             init_for_load_only=init_for_load_only,
         )
+        self.get_scorer().set_masked_entity_prediction_weights(self.get_s_embedder()._embeddings.weight)
 
     def score_spo(self, s: Tensor, p: Tensor, o: Tensor, direction=None) -> Tensor:
         # We overwrite this method to ensure that ConvE only predicts towards objects.

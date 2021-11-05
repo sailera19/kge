@@ -75,32 +75,22 @@ class ReciprocalRelationsContextModel(KgeContextModel):
                 "undirected spo scores."
             )
 
-    def score_po(self, p, o, s=None):
+    def score_po(self, p, o, s=None, num_replaced=0, num_unchanged=0):
         if s is None:
             s = self.get_s_embedder().embed_all()
         else:
             s = self.get_s_embedder().embed(s)
 
-        context = self._context[o]
-        context_shape = context.shape
-
         o_embedder = self.get_o_embedder()
-        p_embedder = self.get_p_embedder()
 
-        context = context.view((context_shape[0] * context_shape[1], context_shape[2]))
-        context_o = torch.zeros((context_shape[0] * context_shape[1], o_embedder.dim), device=context.device)
-        context_p = torch.zeros((context_shape[0] * context_shape[1], p_embedder.dim), device=context.device)
-        unknown_mask = context[:, 0] == -1
+        context_o, context_p = self.embed_context(o, p, s_embedder=o_embedder, drop_neighborhood_fraction=self.scoring_drop_neighborhood_fraction)
 
-        context_o[~unknown_mask] = o_embedder.embed(context[:, 0][~unknown_mask])
-        context_p[~unknown_mask] = p_embedder.embed(context[:, 1][~unknown_mask])
-
-        context_o = context_o.view(context_shape[0], context_shape[1], o_embedder.dim)
-        context_p = context_p.view(context_shape[0], context_shape[1], p_embedder.dim)
+        if num_replaced > 0:
+            o[:num_replaced] = torch.randint(low=0, high=o_embedder.vocab_size, size=(num_replaced,))
 
         p = self.get_p_embedder().embed(p + self.dataset.num_relations())
         o = self.get_o_embedder().embed(o)
-        return self._scorer.score_emb(o, p, s, context_o, context_p, combine="sp_")
+        return self._scorer.score_emb(o, p, s, context_o, context_p, combine="sp_", num_replaced=num_replaced, num_unchanged=num_unchanged)
 
     def score_so(self, s, o, p=None):
         raise Exception("The reciprocal relations model cannot score relations.")
@@ -112,37 +102,15 @@ class ReciprocalRelationsContextModel(KgeContextModel):
         o: torch.Tensor,
         entity_subset: torch.Tensor = None,
     ) -> torch.Tensor:
-        context = self._context[s.long()]
-        context_shape = context.shape
+        batch_size = len(s)
 
         s_embedder = self.get_s_embedder()
         p_embedder = self.get_p_embedder()
         o_embedder = self.get_o_embedder()
 
-        context = context.view((context_shape[0] * context_shape[1], context_shape[2]))
-        context_s = torch.zeros((context_shape[0] * context_shape[1], s_embedder.dim), device=context.device)
-        context_p = torch.zeros((context_shape[0] * context_shape[1], p_embedder.dim), device=context.device)
-        unknown_mask = context[:, 0] == -1
+        context_s, context_p = self.embed_context(s, p)
 
-        context_s[~unknown_mask] = s_embedder.embed(context[:, 0][~unknown_mask])
-        context_p[~unknown_mask] = p_embedder.embed(context[:, 1][~unknown_mask])
-
-        context_s = context_s.view(context_shape[0], context_shape[1], s_embedder.dim)
-        context_p = context_p.view(context_shape[0], context_shape[1], p_embedder.dim)
-
-
-        context = self._context[o.long()]
-        context_shape = context.shape
-        context = context.view((context_shape[0] * context_shape[1], context_shape[2]))
-        context_o = torch.zeros((context_shape[0] * context_shape[1], s_embedder.dim), device=context.device)
-        context_p_inv = torch.zeros((context_shape[0] * context_shape[1], p_embedder.dim), device=context.device)
-        unknown_mask = context[:, 0] == -1
-
-        context_o[~unknown_mask] = o_embedder.embed(context[:, 0][~unknown_mask])
-        context_p_inv[~unknown_mask] = p_embedder.embed(context[:, 1][~unknown_mask])
-
-        context_o = context_o.view(context_shape[0], context_shape[1], o_embedder.dim)
-        context_p_inv = context_p_inv.view(context_shape[0], context_shape[1], p_embedder.dim)
+        context_o, context_p_inv = self.embed_context(o, p, s_embedder=o_embedder)
 
         s = s_embedder.embed(s)
         p_inv = p_embedder.embed(p + self.dataset.num_relations())
@@ -154,8 +122,8 @@ class ReciprocalRelationsContextModel(KgeContextModel):
             else:
                 all_entities = self.get_s_embedder().embed_all()
 
-            sp_scores = self._scorer.score_emb(s, p, all_entities, context_s, context_p, combine="sp_")
-            po_scores = self._scorer.score_emb(o, p_inv, all_entities, context_o, context_p_inv, combine="sp_")
+            sp_scores = self._scorer.score_emb(s, p, all_entities, context_s, context_p, combine="sp_", num_unchanged=batch_size)
+            po_scores = self._scorer.score_emb(o, p_inv, all_entities, context_o, context_p_inv, combine="sp_", num_unchanged=batch_size)
         else:
             if entity_subset is not None:
                 all_objects = o_embedder.embed(entity_subset)
@@ -163,6 +131,18 @@ class ReciprocalRelationsContextModel(KgeContextModel):
             else:
                 all_objects = o_embedder.embed_all()
                 all_subjects = s_embedder.embed_all()
-            sp_scores = self._scorer.score_emb(s, p, all_objects, context_s, context_p, combine="sp_")
-            po_scores = self._scorer.score_emb(o, p_inv, all_subjects, context_o, context_p_inv, combine="sp_")
+            sp_scores = self._scorer.score_emb(s, p, all_objects, context_s, context_p, combine="sp_", num_unchanged=batch_size)
+            po_scores = self._scorer.score_emb(o, p_inv, all_subjects, context_o, context_p_inv, combine="sp_", num_unchanged=batch_size)
         return torch.cat((sp_scores, po_scores), dim=1)
+
+    def recover_entity_po(self, p, o, num_replaced=0, num_unchanged=0):
+        o_embedder = self.get_o_embedder()
+
+        context_o, context_p = self.embed_context(o, p, s_embedder=o_embedder, drop_neighborhood_fraction=self.recover_entity_drop_neighborhood_fraction)
+
+        if num_replaced > 0:
+            o[:num_replaced] = torch.randint(low=0, high=o_embedder.vocab_size, size=(num_replaced,))
+
+        p = self.get_p_embedder().embed(p + self.dataset.num_relations())
+        o = self.get_o_embedder().embed(o)
+        return self._scorer.recover_entity_emb(o, p, context_o, context_p, num_replaced, num_unchanged)
