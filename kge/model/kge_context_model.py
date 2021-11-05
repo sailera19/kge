@@ -47,7 +47,7 @@ class KgeContextModel(KgeModel):
 
             combined_context_tensor = torch.cat(context_map)
 
-            lookup_tensor = torch.div(torch.rand(len(context_map), self.neighborhood_size), (1 / n_neighbors.unsqueeze(1)), rounding_mode="floor")
+            lookup_tensor = torch.rand(len(context_map), self.neighborhood_size) // (1 / n_neighbors.unsqueeze(1))
 
             starting_position = n_neighbors.cumsum(0)
             starting_position = torch.nn.functional.pad(starting_position, (1, -1), "constant", 0).unsqueeze(1)
