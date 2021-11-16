@@ -124,7 +124,7 @@ class Transformer(KgeModel):
             init_for_load_only=init_for_load_only,
         )
 
-    def score_spo(self, s: Tensor, p: Tensor, o: Tensor, direction=None) -> Tensor:
+    def score_spo(self, s: Tensor, p: Tensor, o: Tensor, direction=None, **kwargs) -> Tensor:
         # We overwrite this method to ensure that ConvE only predicts towards objects.
         # If Transformer is wrapped in a reciprocal relations model, this will always be
         # the case.

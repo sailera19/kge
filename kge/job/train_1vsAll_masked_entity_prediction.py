@@ -77,7 +77,8 @@ class TrainingJob1vsAllMaskedEntityPrediction(TrainingJob):
             triples[:, 0],
             triples[:, 1],
             num_replaced=num_scoring_replaced,
-            num_unchanged=num_scoring_unchanged)
+            num_unchanged=num_scoring_unchanged,
+            ground_truth=triples[:, 2])
         loss_value_sp = self.loss(scores_sp, triples[:, 2]) / batch_size
         result.avg_loss += loss_value_sp.item()
         result.forward_time += time.time()
@@ -92,7 +93,8 @@ class TrainingJob1vsAllMaskedEntityPrediction(TrainingJob):
             triples[:, 1],
             triples[:, 2],
             num_replaced=num_scoring_replaced,
-            num_unchanged=num_scoring_unchanged)
+            num_unchanged=num_scoring_unchanged,
+            ground_truth=triples[:, 0])
         loss_value_po = self.loss(scores_po, triples[:, 0]) / batch_size
         result.avg_loss += loss_value_po.item()
         result.forward_time += time.time()
@@ -103,37 +105,40 @@ class TrainingJob1vsAllMaskedEntityPrediction(TrainingJob):
 
 
         # Masked Entity Prediction
-        num_entity_prediction = round(batch_size * self.entity_prediction_fraction)
-        num_entity_prediction_replaced = round(num_entity_prediction * self.entity_prediction_fraction_replaced)
-        num_entity_prediction_unchanged = round(num_entity_prediction * self.entity_prediction_fraction_unchanged)
-        # forward/backward pass (sp)
-        result.forward_time -= time.time()
-        scores_sp = self.model.recover_entity_sp(
-            triples[:num_entity_prediction, 0],
-            triples[:num_entity_prediction, 1],
-            num_replaced=num_entity_prediction_replaced,
-            num_unchanged=num_entity_prediction_unchanged,
-        )
-        loss_value_sp = self.loss(scores_sp, triples[:num_entity_prediction, 0]) / batch_size
-        result.avg_loss += loss_value_sp.item()
-        result.forward_time += time.time()
-        result.backward_time = -time.time()
-        if not self.is_forward_only:
-            loss_value_sp.backward()
-        result.backward_time += time.time()
+        if self.entity_prediction_fraction:
+            num_entity_prediction = round(batch_size * self.entity_prediction_fraction)
+            num_entity_prediction_replaced = round(num_entity_prediction * self.entity_prediction_fraction_replaced)
+            num_entity_prediction_unchanged = round(num_entity_prediction * self.entity_prediction_fraction_unchanged)
+            # forward/backward pass (sp)
+            result.forward_time -= time.time()
+            scores_sp = self.model.recover_entity_sp(
+                triples[:num_entity_prediction, 0],
+                triples[:num_entity_prediction, 1],
+                ground_truth=triples[:num_entity_prediction, 2],
+                num_replaced=num_entity_prediction_replaced,
+                num_unchanged=num_entity_prediction_unchanged,
+            )
+            loss_value_sp = self.loss(scores_sp, triples[:num_entity_prediction, 0]) / batch_size
+            result.avg_loss += loss_value_sp.item()
+            result.forward_time += time.time()
+            result.backward_time = -time.time()
+            if not self.is_forward_only:
+                loss_value_sp.backward()
+            result.backward_time += time.time()
 
-        # forward/backward pass (po)
-        result.forward_time -= time.time()
-        scores_po = self.model.recover_entity_po(
-            triples[:num_entity_prediction, 1],
-            triples[:num_entity_prediction, 2],
-            num_replaced=num_entity_prediction_replaced,
-            num_unchanged=num_entity_prediction_unchanged,
-        )
-        loss_value_po = self.loss(scores_po, triples[:num_entity_prediction, 2]) / batch_size
-        result.avg_loss += loss_value_po.item()
-        result.forward_time += time.time()
-        result.backward_time -= time.time()
-        if not self.is_forward_only:
-            loss_value_po.backward()
-        result.backward_time += time.time()
+            # forward/backward pass (po)
+            result.forward_time -= time.time()
+            scores_po = self.model.recover_entity_po(
+                triples[:num_entity_prediction, 1],
+                triples[:num_entity_prediction, 2],
+                ground_truth=triples[:num_entity_prediction, 0],
+                num_replaced=num_entity_prediction_replaced,
+                num_unchanged=num_entity_prediction_unchanged,
+            )
+            loss_value_po = self.loss(scores_po, triples[:num_entity_prediction, 2]) / batch_size
+            result.avg_loss += loss_value_po.item()
+            result.forward_time += time.time()
+            result.backward_time -= time.time()
+            if not self.is_forward_only:
+                loss_value_po.backward()
+            result.backward_time += time.time()

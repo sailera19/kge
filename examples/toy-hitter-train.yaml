@@ -1,5 +1,6 @@
 job.type: train
-dataset.name: fb15k-237
+dataset.name: toy
+dataset.pickle: false
 
 #model: reciprocal_relations_model
 #reciprocal_relations_model.base_model.type: transformer # redundant since also default
@@ -7,7 +8,7 @@ dataset.name: fb15k-237
 
 model: reciprocal_relations_context_model
 reciprocal_relations_context_model.base_model.type: hitter # redundant since also default
-reciprocal_relations_context_model.neighborhood_size: 50
+reciprocal_relations_context_model.neighborhood_size: 12
 reciprocal_relations_context_model.base_model.neighborhood_size: 0
 reciprocal_relations_context_model.base_model.encoder.dropout: 0.1
 reciprocal_relations_context_model.base_model.scoring_fraction_masked: 0.1
@@ -15,7 +16,7 @@ reciprocal_relations_context_model.base_model.scoring_fraction_masked: 0.1
 
 train:
   batch_size: 512
-  loss_arg: .nan
+  loss_arg: 1.0
   lr_warmup: 50
   lr_scheduler: LinearLR
   lr_scheduler_args:
@@ -23,11 +24,8 @@ train:
     end_factor: 0
     total_iters: 450
   max_epochs: 500
-  optimizer: Adamax
   optimizer_args:
     lr: 0.01
-    eps: 1e-6
-    weight_decay: 0.01
   type: 1vsAllMaskedEntityPrediction
 
 valid:
@@ -36,13 +34,13 @@ valid:
   every: 1
   metric: mean_reciprocal_rank_filtered_with_test
 
+eval:
+  batch_size: 512
+
 lookup_embedder:
-  dim: 80
-  initialize: normal_
-  initialize_args:
-    normal_:
-      std: 0.02
-  dropout: 0.
+  dim: 320
+  initialize: xavier_normal_
+  dropout: 0.6
 
 #conve:
 #  feature_map_dropout: 0.48769345636955713
@@ -53,7 +51,7 @@ lookup_embedder:
 #  round_dim: true
 
 1vsAllMaskedEntityPrediction:
-  entity_prediction_fraction: 0.
+  entity_prediction_fraction: 0.5
   entity_prediction_fraction_replaced: 0.1
   entity_prediction_fraction_unchanged: 0.1
   scoring_fraction_replaced: 0.1

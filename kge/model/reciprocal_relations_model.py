@@ -58,7 +58,7 @@ class ReciprocalRelationsModel(KgeModel):
     def penalty(self, **kwargs):
         return self._base_model.penalty(**kwargs)
 
-    def score_spo(self, s: Tensor, p: Tensor, o: Tensor, direction=None) -> Tensor:
+    def score_spo(self, s: Tensor, p: Tensor, o: Tensor, direction=None, **kwargs) -> Tensor:
         if direction == "o":
             return super().score_spo(s, p, o, "o")
         elif direction == "s":
@@ -69,7 +69,7 @@ class ReciprocalRelationsModel(KgeModel):
                 "undirected spo scores."
             )
 
-    def score_po(self, p, o, s=None):
+    def score_po(self, p, o, s=None, **kwargs):
         if s is None:
             s = self.get_s_embedder().embed_all()
         else:
@@ -78,7 +78,7 @@ class ReciprocalRelationsModel(KgeModel):
         o = self.get_o_embedder().embed(o)
         return self._scorer.score_emb(o, p, s, combine="sp_")
 
-    def score_so(self, s, o, p=None):
+    def score_so(self, s, o, p=None, **kwargs):
         raise Exception("The reciprocal relations model cannot score relations.")
 
     def score_sp_po(
@@ -87,6 +87,7 @@ class ReciprocalRelationsModel(KgeModel):
         p: torch.Tensor,
         o: torch.Tensor,
         entity_subset: torch.Tensor = None,
+        **kwargs,
     ) -> torch.Tensor:
         s = self.get_s_embedder().embed(s)
         p_inv = self.get_p_embedder().embed(p + self.dataset.num_relations())

@@ -110,7 +110,7 @@ class HitterScorer(RelationalScorer):
 
     def score_emb(
             self, s_emb: Tensor, p_emb: Tensor, o_emb: Tensor, context_s_emb: Tensor, context_p_emb: Tensor,
-            combine: str, num_replaced=0, num_unchanged=0
+            attention_mask, combine: str, num_replaced=0, num_unchanged=0
     ):
         """
 
@@ -134,27 +134,41 @@ class HitterScorer(RelationalScorer):
 
         # transform the sp pairs
         batch_size = len(s_emb)
+        #entity_prepare_time = -time.time()
         context_size = context_s_emb.shape[1]
         context_s_dim = context_s_emb.shape[2]
         context_p_dim = context_p_emb.shape[2]
 
         s_emb[num_replaced + num_unchanged:] = self.mask_emb
 
-        entity_out = self.entity_encoder.forward(
+        attention_mask = torch.cat([attention_mask.new_ones(batch_size).unsqueeze(1), attention_mask], dim=1)
+        attention_mask_flattened = attention_mask.view(batch_size * (context_size + 1))
+
+        entity_out = s_emb.new_empty((batch_size * (context_size + 1), context_s_dim))
+        #entity_prepare_time += time.time()
+        #print(f"entity_prepare_time: {entity_prepare_time}")
+        #entity_forward_time = -time.time()
+        entity_out[attention_mask_flattened] = self.entity_encoder.forward(
             torch.stack(
                 (
-                    self.cls_emb.repeat((batch_size * (context_size + 1), 1)),
-                    torch.cat([s_emb.view(batch_size, 1, context_s_dim), context_s_emb], dim=1).view((batch_size * (context_size + 1), context_s_dim)) + self.sub_type_emb.unsqueeze(0),
-                    torch.cat([p_emb.view(batch_size, 1, context_p_dim), context_p_emb], dim=1).view((batch_size * (context_size + 1), context_p_dim)) + self.rel_type_emb.unsqueeze(0),
+                    self.cls_emb.repeat((attention_mask.sum(), 1)),
+                    torch.cat([s_emb.view(batch_size, 1, context_s_dim), context_s_emb], dim=1).view((batch_size * (context_size + 1), context_s_dim))[attention_mask_flattened] + self.sub_type_emb.unsqueeze(0),
+                    torch.cat([p_emb.view(batch_size, 1, context_p_dim), context_p_emb], dim=1).view((batch_size * (context_size + 1), context_s_dim))[attention_mask_flattened] + self.rel_type_emb.unsqueeze(0),
                 ),
                 dim=0,
                 )
-            )
+            )[0, :]
+        #entity_forward_time += time.time()
+        #print(f"entity_forward_time: {entity_forward_time}")
+        #context_prepare_time = -time.time()
+        entity_out[~attention_mask_flattened] = 0
 
-        entity_out = torch.transpose(entity_out[0, :].view((batch_size, context_size + 1, context_s_dim)), 0, 1)
+        entity_out = torch.transpose(entity_out.view((batch_size, context_size + 1, context_s_dim)), 0, 1)
+
+        attention_mask = torch.cat([attention_mask.new_ones(batch_size).unsqueeze(1), attention_mask], dim=1)
 
         out = self.context_encoder.forward(
-            torch.cat([self.gcls_emb.repeat((batch_size, 1)).unsqueeze(0), entity_out])
+            torch.cat([self.gcls_emb.repeat((batch_size, 1)).unsqueeze(0), entity_out]), src_key_padding_mask=~attention_mask
             )
 
         out = out[0, ::]
@@ -170,7 +184,7 @@ class HitterScorer(RelationalScorer):
         # all done
         return out.view(batch_size, -1)
 
-    def recover_entity_emb(self, s_emb, p_emb, context_s_emb, context_p_emb, num_replaced=0, num_unchanged=0):
+    def recover_entity_emb(self, s_emb, p_emb, context_s_emb, context_p_emb, attention_mask, num_replaced=0, num_unchanged=0):
         """
         recovers labels
         Args:
@@ -190,21 +204,30 @@ class HitterScorer(RelationalScorer):
 
         s_emb[num_replaced + num_unchanged:] = self.mask_emb
 
-        entity_out = self.entity_encoder.forward(
+        attention_mask = torch.cat([attention_mask.new_ones(batch_size).unsqueeze(1), attention_mask], dim=1)
+        attention_mask_flattened = attention_mask.view(batch_size * (context_size + 1))
+
+        entity_out = s_emb.new_empty((batch_size * (context_size + 1), context_s_dim))
+
+        entity_out[attention_mask_flattened] = self.entity_encoder.forward(
             torch.stack(
                 (
-                    self.cls_emb.repeat((batch_size * (context_size + 1), 1)),
-                    torch.cat([s_emb.view(batch_size, 1, context_s_dim), context_s_emb], dim=1).view((batch_size * (context_size + 1), context_s_dim)) + self.sub_type_emb.unsqueeze(0),
-                    torch.cat([p_emb.view(batch_size, 1, context_p_dim), context_p_emb], dim=1).view((batch_size * (context_size + 1), context_p_dim)) + self.rel_type_emb.unsqueeze(0),
+                    self.cls_emb.repeat((attention_mask.sum(), 1)),
+                    torch.cat([s_emb.view(batch_size, 1, context_s_dim), context_s_emb], dim=1).view((batch_size * (context_size + 1), context_s_dim))[attention_mask_flattened] + self.sub_type_emb.unsqueeze(0),
+                    torch.cat([p_emb.view(batch_size, 1, context_p_dim), context_p_emb], dim=1).view((batch_size * (context_size + 1), context_s_dim))[attention_mask_flattened] + self.rel_type_emb.unsqueeze(0),
                 ),
                 dim=0,
                 )
-            )
+            )[0, :]
 
-        entity_out = torch.transpose(entity_out[0, :].view((batch_size, context_size + 1, context_s_dim)), 0, 1)
+        entity_out[~attention_mask_flattened] = 0
+
+        entity_out = torch.transpose(entity_out.view((batch_size, context_size + 1, context_s_dim)), 0, 1)
+
+        attention_mask = torch.cat([attention_mask.new_ones(batch_size).unsqueeze(1), attention_mask], dim=1)
 
         out = self.context_encoder.forward(
-            torch.cat([self.gcls_emb.repeat((batch_size, 1)).unsqueeze(0), entity_out])
+            torch.cat([self.gcls_emb.repeat((batch_size, 1)).unsqueeze(0), entity_out]), src_key_padding_mask=~attention_mask
             )
 
         out = out[1, ::]
@@ -234,7 +257,7 @@ class Hitter(KgeModel):
         )
         self.get_scorer().set_masked_entity_prediction_weights(self.get_s_embedder()._embeddings.weight)
 
-    def score_spo(self, s: Tensor, p: Tensor, o: Tensor, direction=None) -> Tensor:
+    def score_spo(self, s: Tensor, p: Tensor, o: Tensor, direction=None, **kwargs) -> Tensor:
         # We overwrite this method to ensure that ConvE only predicts towards objects.
         # If Transformer is wrapped in a reciprocal relations model, this will always be
         # the case.
