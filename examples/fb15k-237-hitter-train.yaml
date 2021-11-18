@@ -1,28 +1,22 @@
 job.type: train
 dataset.name: fb15k-237
 
-#model: reciprocal_relations_model
-#reciprocal_relations_model.base_model.type: transformer # redundant since also default
-
-
 model: reciprocal_relations_context_model
 reciprocal_relations_context_model.base_model.type: hitter # redundant since also default
 reciprocal_relations_context_model.neighborhood_size: 50
 reciprocal_relations_context_model.base_model.neighborhood_size: 0
 reciprocal_relations_context_model.base_model.encoder.dropout: 0.1
-reciprocal_relations_context_model.base_model.scoring_fraction_masked: 0.1
-#reciprocal_relations_context_model.base_model.encoder.context_encoder.num_layers: 6
 
 train:
   batch_size: 512
   loss_arg: .nan
-  lr_warmup: 50
+  lr_warmup: 30
   lr_scheduler: LinearLR
   lr_scheduler_args:
     start_factor: 1
     end_factor: 0
-    total_iters: 450
-  max_epochs: 500
+    total_iters: 270
+  max_epochs: 300
   optimizer: Adamax
   optimizer_args:
     lr: 0.01
@@ -32,12 +26,12 @@ train:
 
 valid:
   early_stopping:
-    patience: 5
-  every: 1
+    patience: 10
+  every: 5
   metric: mean_reciprocal_rank_filtered_with_test
 
 lookup_embedder:
-  dim: 80
+  dim: 320
   initialize: normal_
   initialize_args:
     normal_:
@@ -56,5 +50,5 @@ lookup_embedder:
   entity_prediction_fraction: 0.
   entity_prediction_fraction_replaced: 0.1
   entity_prediction_fraction_unchanged: 0.1
-  scoring_fraction_replaced: 0.1
-  scoring_fraction_unchanged: 0.8
+  scoring_fraction_replaced: 0.
+  scoring_fraction_unchanged: 0.5

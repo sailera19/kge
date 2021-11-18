@@ -216,6 +216,8 @@ def main():
         if value is not None:
             if key == "search.device_pool":
                 value = "".join(value).split(",")
+            if key == "job.device_pool":
+                value = [int(v) for v in "".join(value).split(",")]
             try:
                 if isinstance(config.get(key), bool):
                     value = argparse_bool_type(value)
