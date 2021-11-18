@@ -41,6 +41,8 @@ class HitterScorer(RelationalScorer):
         self.initialize(self.sub_type_emb)
         self.rel_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.rel_type_emb)
+        self.gcls_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.gcls_type_emb)
         self.src_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.src_type_emb)
         self.context_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
@@ -164,6 +166,10 @@ class HitterScorer(RelationalScorer):
         entity_out[~attention_mask_flattened] = 0
 
         entity_out = torch.transpose(entity_out.view((batch_size, context_size + 1, context_s_dim)), 0, 1)
+
+        entity_out[:, 0] += self.gcls_type_emb
+        entity_out[:, 1] += self.src_type_emb
+        entity_out[:, 2:] += self.context_type_emb
 
         attention_mask = torch.cat([attention_mask.new_ones(batch_size).unsqueeze(1), attention_mask], dim=1)
 
