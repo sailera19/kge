@@ -30,7 +30,7 @@ job:
   # Main device to use for this job (e.g., 'cpu', 'cuda', 'cuda:0')
   device: 'cuda'
 
-  multi_gpu: True
+  multi_gpu: False
 
   # Device pool to use for training jobs. If this list is empty and multi_gpu is True,
   # all devices will be used. Needs to be a list of device indices, not string names.
