@@ -4,6 +4,7 @@ from torch.optim.lr_scheduler import _LRScheduler
 import re
 from operator import or_
 from functools import reduce
+from .bert_optim import Adamax
 
 
 class KgeOptimizer:
@@ -13,7 +14,10 @@ class KgeOptimizer:
     def create(config, model):
         """ Factory method for optimizer creation """
         try:
-            optimizer = getattr(torch.optim, config.get("train.optimizer.default.type"))
+            name = config.get("train.optimizer.default.type")
+            optimizer = getattr(torch.optim, name)
+            if name == "Adamax":
+                optimizer = Adamax
             return optimizer(
                 KgeOptimizer._get_parameters_and_optimizer_args(config, model),
                 **config.get("train.optimizer.default.args"),
