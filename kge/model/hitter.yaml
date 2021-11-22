@@ -28,9 +28,11 @@ hitter:
     # see torch.nn.TransformerEncoder
     entity_encoder:
       num_layers: 3                # the number of sub-encoder-layers in the encoder
+      dropout: 0.6
 
     context_encoder:
       num_layers: 6                # the number of sub-encoder-layers in the encoder
+      dropout: 0.1
 
 
   # Initialization for transformer layers, CLS embedding and type embeddings.

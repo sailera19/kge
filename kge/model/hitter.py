@@ -61,6 +61,9 @@ class HitterScorer(RelationalScorer):
                 )
                 dropout = 0.0
 
+        self.entity_dropout = self.get_option("encoder.entity_encoder.dropout")
+        self.context_dropout = self.get_option("encoder.context_encoder.dropout")
+
         self.entity_encoder_layer = torch.nn.TransformerEncoderLayer(
             d_model=self.emb_dim,
             nhead=self.get_option("encoder.nhead"),
@@ -136,7 +139,6 @@ class HitterScorer(RelationalScorer):
 
         # transform the sp pairs
         batch_size = len(s_emb)
-        #entity_prepare_time = -time.time()
         context_size = context_s_emb.shape[1]
         context_s_dim = context_s_emb.shape[2]
         context_p_dim = context_p_emb.shape[2]
@@ -146,36 +148,37 @@ class HitterScorer(RelationalScorer):
         attention_mask = torch.cat([attention_mask.new_ones(batch_size).unsqueeze(1), attention_mask], dim=1)
         attention_mask_flattened = attention_mask.view(batch_size * (context_size + 1))
 
+        entity_in = torch.stack(
+            (
+                self.cls_emb.repeat((attention_mask.sum(), 1)),
+                torch.cat([s_emb.view(batch_size, 1, context_s_dim), context_s_emb], dim=1).view(
+                    (batch_size * (context_size + 1), context_s_dim))[
+                    attention_mask_flattened] + self.sub_type_emb.unsqueeze(0),
+                torch.cat([p_emb.view(batch_size, 1, context_p_dim), context_p_emb], dim=1).view(
+                    (batch_size * (context_size + 1), context_s_dim))[
+                    attention_mask_flattened] + self.rel_type_emb.unsqueeze(0),
+            ),
+            dim=0,
+        )
+
+        entity_in = torch.nn.functional.dropout(entity_in, p=self.entity_dropout, training=self.training)
+
         entity_out = s_emb.new_empty((batch_size * (context_size + 1), context_s_dim))
-        #entity_prepare_time += time.time()
-        #print(f"entity_prepare_time: {entity_prepare_time}")
-        #entity_forward_time = -time.time()
-        entity_out[attention_mask_flattened] = self.entity_encoder.forward(
-            torch.stack(
-                (
-                    self.cls_emb.repeat((attention_mask.sum(), 1)),
-                    torch.cat([s_emb.view(batch_size, 1, context_s_dim), context_s_emb], dim=1).view((batch_size * (context_size + 1), context_s_dim))[attention_mask_flattened] + self.sub_type_emb.unsqueeze(0),
-                    torch.cat([p_emb.view(batch_size, 1, context_p_dim), context_p_emb], dim=1).view((batch_size * (context_size + 1), context_s_dim))[attention_mask_flattened] + self.rel_type_emb.unsqueeze(0),
-                ),
-                dim=0,
-                )
-            )[0, :]
-        #entity_forward_time += time.time()
-        #print(f"entity_forward_time: {entity_forward_time}")
-        #context_prepare_time = -time.time()
+
+        entity_out[attention_mask_flattened] = self.entity_encoder.forward(entity_in)[0, :]
+
         entity_out[~attention_mask_flattened] = 0
 
         entity_out = torch.transpose(entity_out.view((batch_size, context_size + 1, context_s_dim)), 0, 1)
 
-        entity_out[:, 0] += self.gcls_type_emb
+        entity_out = torch.cat([self.gcls_emb.repeat((batch_size, 1)).unsqueeze(0), entity_out])
         entity_out[:, 1] += self.src_type_emb
         entity_out[:, 2:] += self.context_type_emb
+        entity_out = torch.nn.functional.dropout(entity_out, p=self.context_dropout, training=self.training)
 
         attention_mask = torch.cat([attention_mask.new_ones(batch_size).unsqueeze(1), attention_mask], dim=1)
 
-        out = self.context_encoder.forward(
-            torch.cat([self.gcls_emb.repeat((batch_size, 1)).unsqueeze(0), entity_out]), src_key_padding_mask=~attention_mask
-            )
+        out = self.context_encoder.forward(entity_out, src_key_padding_mask=~attention_mask)
 
         out = out[0, ::]
 

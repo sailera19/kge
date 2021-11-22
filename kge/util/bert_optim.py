@@ -3,19 +3,6 @@
 import torch
 from torch.optim import Optimizer
 from torch.nn.utils import clip_grad_norm_
-from pytorch_pretrained_bert.optimization import warmup_linear
-
-def warmup_linear_xdl(x, warmup=0.002):
-    if x < warmup:
-        return x/warmup
-    return (1.0 - x)/(1.0 - warmup)
-
-def schedule_func(sch):
-    try:
-        f = eval(sch)
-    except:
-        f = warmup_linear
-    return f
 
 class Adamax(Optimizer):
     """Implements BERT version of Adam algorithm with weight decay fix (and no ).
