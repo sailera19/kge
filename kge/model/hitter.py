@@ -6,6 +6,11 @@ import math
 from kge import Config, Dataset
 from kge.model.kge_context_model import KgeContextModel
 from kge.model.kge_model import RelationalScorer, KgeModel
+from kge.util import rat
+
+from pytorch_pretrained_bert.modeling import BertEncoder, BertConfig, BertLayerNorm, BertPreTrainedModel
+
+from functools import partial
 
 
 class HitterScorer(RelationalScorer):
@@ -66,50 +71,83 @@ class HitterScorer(RelationalScorer):
 
         self.entity_layer_norm = torch.nn.LayerNorm(self.emb_dim, eps=1e-12)
         self.context_layer_norm = torch.nn.LayerNorm(self.emb_dim, eps=1e-12)
+        self.transformer_impl = self.get_option("implementation")
 
-        self.entity_encoder_layer = torch.nn.TransformerEncoderLayer(
-            d_model=self.emb_dim,
-            nhead=self.get_option("encoder.nhead"),
-            dim_feedforward=self.get_option("encoder.dim_feedforward"),
-            dropout=dropout,
-            activation=self.get_option("encoder.activation"),
-        )
-        self.entity_encoder = torch.nn.TransformerEncoder(
-            self.entity_encoder_layer, num_layers=self.get_option("encoder.entity_encoder.num_layers")
-        )
-        for layer in self.entity_encoder.layers:
-            self.initialize(layer.linear1.weight.data)
-            self.initialize(layer.linear2.weight.data)
-            self.initialize(layer.self_attn.out_proj.weight.data)
+        if self.transformer_impl == "pytorch":
+            self.entity_encoder_layer = torch.nn.TransformerEncoderLayer(
+                d_model=self.emb_dim,
+                nhead=self.get_option("encoder.nhead"),
+                dim_feedforward=self.get_option("encoder.dim_feedforward"),
+                dropout=dropout,
+                activation=self.get_option("encoder.activation"),
+            )
+            self.entity_encoder = torch.nn.TransformerEncoder(
+                self.entity_encoder_layer, num_layers=self.get_option("encoder.entity_encoder.num_layers")
+            )
+            for layer in self.entity_encoder.layers:
+                self.initialize(layer.linear1.weight.data)
+                self.initialize(layer.linear2.weight.data)
+                self.initialize(layer.self_attn.out_proj.weight.data)
 
-            if layer.self_attn._qkv_same_embed_dim:
-                self.initialize(layer.self_attn.in_proj_weight)
-            else:
-                self.initialize(layer.self_attn.q_proj_weight)
-                self.initialize(layer.self_attn.k_proj_weight)
-                self.initialize(layer.self_attn.v_proj_weight)
+                if layer.self_attn._qkv_same_embed_dim:
+                    self.initialize(layer.self_attn.in_proj_weight)
+                else:
+                    self.initialize(layer.self_attn.q_proj_weight)
+                    self.initialize(layer.self_attn.k_proj_weight)
+                    self.initialize(layer.self_attn.v_proj_weight)
 
-        self.context_encoder_layer = torch.nn.TransformerEncoderLayer(
-            d_model=self.emb_dim,
-            nhead=self.get_option("encoder.nhead"),
-            dim_feedforward=self.get_option("encoder.dim_feedforward"),
-            dropout=dropout,
-            activation=self.get_option("encoder.activation"),
-        )
-        self.context_encoder = torch.nn.TransformerEncoder(
-            self.context_encoder_layer, num_layers=self.get_option("encoder.context_encoder.num_layers")
-        )
-        for layer in self.context_encoder.layers:
-            self.initialize(layer.linear1.weight.data)
-            self.initialize(layer.linear2.weight.data)
-            self.initialize(layer.self_attn.out_proj.weight.data)
+            self.context_encoder_layer = torch.nn.TransformerEncoderLayer(
+                d_model=self.emb_dim,
+                nhead=self.get_option("encoder.nhead"),
+                dim_feedforward=self.get_option("encoder.dim_feedforward"),
+                dropout=dropout,
+                activation=self.get_option("encoder.activation"),
+            )
+            self.context_encoder = torch.nn.TransformerEncoder(
+                self.context_encoder_layer, num_layers=self.get_option("encoder.context_encoder.num_layers")
+            )
+            for layer in self.context_encoder.layers:
+                self.initialize(layer.linear1.weight.data)
+                self.initialize(layer.linear2.weight.data)
+                self.initialize(layer.self_attn.out_proj.weight.data)
 
-            if layer.self_attn._qkv_same_embed_dim:
-                self.initialize(layer.self_attn.in_proj_weight)
-            else:
-                self.initialize(layer.self_attn.q_proj_weight)
-                self.initialize(layer.self_attn.k_proj_weight)
-                self.initialize(layer.self_attn.v_proj_weight)
+                if layer.self_attn._qkv_same_embed_dim:
+                    self.initialize(layer.self_attn.in_proj_weight)
+                else:
+                    self.initialize(layer.self_attn.q_proj_weight)
+                    self.initialize(layer.self_attn.k_proj_weight)
+                    self.initialize(layer.self_attn.v_proj_weight)
+        elif self.transformer_impl == "microsoft":
+            self.context_encoder = rat.Encoder(
+                lambda: rat.EncoderLayer(
+                    self.emb_dim,
+                    rat.MultiHeadedAttentionWithRelations(
+                        self.get_option("encoder.nhead"),
+                        self.emb_dim,
+                        self.get_option("encoder.dropout")),
+                    rat.PositionwiseFeedForward(
+                        self.emb_dim,
+                        self.get_option("encoder.dim_feedforward"),
+                        self.get_option("encoder.dropout")),
+                    num_relation_kinds=0,
+                    dropout=self.get_option("encoder.dropout")),
+                self.get_option("encoder.context_encoder.num_layers"),
+                self.get_option("initialize_args.std"),
+                tie_layers=False)
+
+            config = BertConfig(0, hidden_size=self.emb_dim,
+                                num_hidden_layers=self.get_option("encoder.entity_encoder.num_layers"),
+                                num_attention_heads=self.get_option("encoder.nhead"),
+                                intermediate_size=self.get_option("encoder.dim_feedforward"),
+                                hidden_act=self.get_option("encoder.activation"),
+                                hidden_dropout_prob=self.get_option("encoder.dropout"),
+                                attention_probs_dropout_prob=self.get_option("encoder.dropout"),
+                                max_position_embeddings=0,  # no effect
+                                type_vocab_size=0,  # no effect
+                                initializer_range=self.get_option("initialize_args.std"))
+            self.entity_encoder = BertEncoder(config)
+            self.entity_encoder.config = config
+            self.entity_encoder.apply(partial(BertPreTrainedModel.init_bert_weights, self.entity_encoder))
 
         self.entity_prediction_layer = torch.nn.Linear(in_features=self.emb_dim, out_features=dataset.num_entities())
 
@@ -170,7 +208,10 @@ class HitterScorer(RelationalScorer):
 
         entity_out = s_emb.new_empty((batch_size * (context_size + 1), context_s_dim))
 
-        entity_out[attention_mask_flattened] = self.entity_encoder.forward(entity_in)[0, :]
+        if self.transformer_impl == "pytorch":
+            entity_out[attention_mask_flattened] = self.entity_encoder.forward(entity_in)[0, :]
+        else:
+            entity_out[attention_mask_flattened] = self.entity_encoder.forward(entity_in, attention_mask_flattened.new_tensor([True]).repeat(attention_mask_flattened.sum()))[-1][0, :]
 
         entity_out[~attention_mask_flattened] = 0
 
@@ -185,7 +226,10 @@ class HitterScorer(RelationalScorer):
 
         attention_mask = torch.cat([attention_mask.new_ones(batch_size).unsqueeze(1), attention_mask], dim=1)
 
-        out = self.context_encoder.forward(entity_out, src_key_padding_mask=~attention_mask)
+        if self.transformer_impl == "pytorch":
+            out = self.context_encoder.forward(entity_out, src_key_padding_mask=~attention_mask)
+        else:
+            out = self.context_encoder.forward(entity_out.transpose(0, 1), None, self.convert_mask_rat(~attention_mask))[-1].transpose(0,1)
 
         out = out[0, ::]
 
@@ -251,6 +295,11 @@ class HitterScorer(RelationalScorer):
         out = self.entity_prediction_layer.forward(out)
 
         return out
+
+
+    def convert_mask_rat(self, attention_mask):
+        attention_mask = attention_mask.unsqueeze(1).repeat(1, attention_mask.size(1), 1)
+        return attention_mask
 
 
 class Hitter(KgeModel):

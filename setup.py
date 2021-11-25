@@ -23,6 +23,7 @@ setup(
         # see http://numba.pydata.org/numba-doc/0.50.1/reference/pysupported.html
         "numba==0.50.*",
         "networkx==2.4",
+        "pytorch-pretrained-bert==0.6.0",
     ],
     # Ax 0.1.10 requires python 3.7. Numba does not yet support for Python 3.9:
     # https://github.com/numba/numba/issues/6345
