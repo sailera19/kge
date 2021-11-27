@@ -68,6 +68,7 @@ class HitterScorer(RelationalScorer):
 
         self.entity_dropout = self.get_option("encoder.entity_encoder.dropout")
         self.context_dropout = self.get_option("encoder.context_encoder.dropout")
+        self.output_dropout = self.get_option("output_dropout")
 
         self.entity_layer_norm = torch.nn.LayerNorm(self.emb_dim, eps=1e-12)
         self.context_layer_norm = torch.nn.LayerNorm(self.emb_dim, eps=1e-12)
@@ -232,6 +233,8 @@ class HitterScorer(RelationalScorer):
             out = self.context_encoder.forward(entity_out.transpose(0, 1), None, self.convert_mask_rat(~attention_mask))[-1].transpose(0,1)
 
         out = out[0, ::]
+
+        o_emb = torch.nn.functional.dropout(o_emb, self.output_dropout, training=self.training)
 
         # now take dot product
         if combine == "sp_":

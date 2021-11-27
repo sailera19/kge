@@ -6,6 +6,8 @@ reciprocal_relations_context_model.base_model.type: hitter # redundant since als
 reciprocal_relations_context_model.neighborhood_size: 50
 reciprocal_relations_context_model.base_model.neighborhood_size: 0
 reciprocal_relations_context_model.base_model.encoder.dropout: 0.1
+reciprocal_relations_context_model.base_model.output_dropout: 0.6
+reciprocal_relations_context_model.base_model.implementation: pytorch
 
 train:
   batch_size: 512
