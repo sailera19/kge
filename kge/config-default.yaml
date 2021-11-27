@@ -307,15 +307,6 @@ train:
 1vsAll:
   class_name: TrainingJob1vsAll
 
-# Options for 1vsAllMaskedEntityPrediction training (train.type=="1vsAll")
-1vsAllMaskedEntityPrediction:
-  class_name: TrainingJob1vsAllMaskedEntityPrediction
-  entity_prediction_fraction: 1.0
-  entity_prediction_fraction_replaced: 0.0
-  entity_prediction_fraction_unchanged: 0.0
-  scoring_fraction_replaced: 0.0
-  scoring_fraction_unchanged: 1.0
-
 
 # Options for KvsAll training (train.type=="KvsAll")
 KvsAll:

@@ -73,7 +73,7 @@ class ReciprocalRelationsContextModel(KgeContextModel):
                 "undirected spo scores."
             )
 
-    def score_po(self, p, o, s=None, num_replaced=0, num_unchanged=0, ground_truth=None, **kwargs):
+    def score_po(self, p, o, s=None, ground_truth=None, **kwargs):
         if s is None:
             s = self.get_s_embedder().embed_all()
         else:
@@ -81,18 +81,20 @@ class ReciprocalRelationsContextModel(KgeContextModel):
 
         o_embedder = self.get_o_embedder()
 
+        num_masked, num_replaced = self._get_masked_replaced(o)
+
         context_o, context_p, attention_mask = self.embed_context(o,
                                                                   p + self.dataset.num_relations(),
                                                                   ground_truth,
                                                                   s_embedder=o_embedder,
-                                                                  drop_neighborhood_fraction=self.scoring_drop_neighborhood_fraction)
-
+                                                                  drop_neighborhood_fraction=self.drop_neighborhood_fraction)
+        o_emb = o.clone()
         if num_replaced > 0:
-            o[:num_replaced] = torch.randint(low=0, high=o_embedder.vocab_size, size=(num_replaced,))
+            o_emb[:num_replaced] = torch.randint(low=0, high=o_embedder.vocab_size, size=(num_replaced,))
 
         p = self.get_p_embedder().embed(p + self.dataset.num_relations())
-        o = self.get_o_embedder().embed(o)
-        return self._scorer.score_emb(o, p, s, context_o, context_p, attention_mask, combine="sp_", num_replaced=num_replaced, num_unchanged=num_unchanged)
+        o_emb = self.get_o_embedder().embed(o_emb)
+        return self._scorer.score_emb(o_emb, p, s, context_o, context_p, attention_mask, combine="sp_", num_replaced=num_replaced, num_masked=num_masked, ground_truth_s=o)
 
     def score_so(self, s, o, p=None, **kwargs):
         raise Exception("The reciprocal relations model cannot score relations.")
@@ -125,8 +127,8 @@ class ReciprocalRelationsContextModel(KgeContextModel):
             else:
                 all_entities = self.get_s_embedder().embed_all()
 
-            sp_scores = self._scorer.score_emb(s, p, all_entities, context_s, context_p, attention_mask, combine="sp_", num_unchanged=batch_size)
-            po_scores = self._scorer.score_emb(o, p_inv, all_entities, context_o, context_p_inv, attention_mask_inv, combine="sp_", num_unchanged=batch_size)
+            sp_scores = self._scorer.score_emb(s, p, all_entities, context_s, context_p, attention_mask, combine="sp_")
+            po_scores = self._scorer.score_emb(o, p_inv, all_entities, context_o, context_p_inv, attention_mask_inv, combine="sp_")
         else:
             if entity_subset is not None:
                 all_objects = o_embedder.embed(entity_subset)
@@ -137,15 +139,3 @@ class ReciprocalRelationsContextModel(KgeContextModel):
             sp_scores = self._scorer.score_emb(s, p, all_objects, context_s, context_p, combine="sp_", num_unchanged=batch_size)
             po_scores = self._scorer.score_emb(o, p_inv, all_subjects, context_o, context_p_inv, combine="sp_", num_unchanged=batch_size)
         return torch.cat((sp_scores, po_scores), dim=1)
-
-    def recover_entity_po(self, p, o, num_replaced=0, num_unchanged=0, ground_truth=None):
-        o_embedder = self.get_o_embedder()
-
-        context_o, context_p, attention_mask = self.embed_context(o, p + self.dataset.num_relations(), ground_truth, s_embedder=o_embedder, drop_neighborhood_fraction=self.recover_entity_drop_neighborhood_fraction)
-
-        if num_replaced > 0:
-            o[:num_replaced] = torch.randint(low=0, high=o_embedder.vocab_size, size=(num_replaced,))
-
-        p = self.get_p_embedder().embed(p + self.dataset.num_relations())
-        o = self.get_o_embedder().embed(o)
-        return self._scorer.recover_entity_emb(o, p, context_o, context_p, attention_mask, num_replaced, num_unchanged)

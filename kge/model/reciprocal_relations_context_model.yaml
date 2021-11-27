@@ -3,8 +3,9 @@ import: [conve]
 reciprocal_relations_context_model:
   class_name: ReciprocalRelationsContextModel
   neighborhood_size: 12
-  scoring_drop_neighborhood_fraction: 0.3
-  recover_entity_drop_neighborhood_fraction: 0.3
+  drop_neighborhood_fraction: 0.3
+  fraction_replaced: 0.
+  fraction_masked: 0.
   base_model:
     type: conve
     +++: +++

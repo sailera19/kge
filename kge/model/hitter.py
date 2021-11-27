@@ -6,7 +6,7 @@ import math
 from kge import Config, Dataset
 from kge.model.kge_context_model import KgeContextModel
 from kge.model.kge_model import RelationalScorer, KgeModel
-from kge.util import rat
+from kge.util import rat, KgeLoss
 
 from pytorch_pretrained_bert.modeling import BertEncoder, BertConfig, BertLayerNorm, BertPreTrainedModel
 
@@ -34,6 +34,8 @@ class HitterScorer(RelationalScorer):
     def __init__(self, config: Config, dataset: Dataset, configuration_key=None, embedding_weights=None):
         super().__init__(config, dataset, configuration_key)
         self.emb_dim = self.get_option("entity_embedder.dim")
+
+        self.loss = KgeLoss.create(config)
 
         # the CLS embedding
         self.cls_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
@@ -69,6 +71,8 @@ class HitterScorer(RelationalScorer):
         self.entity_dropout = self.get_option("encoder.entity_encoder.dropout")
         self.context_dropout = self.get_option("encoder.context_encoder.dropout")
         self.output_dropout = self.get_option("output_dropout")
+        self.mlm_fraction = self.get_option("mlm_fraction")
+
 
         self.entity_layer_norm = torch.nn.LayerNorm(self.emb_dim, eps=1e-12)
         self.context_layer_norm = torch.nn.LayerNorm(self.emb_dim, eps=1e-12)
@@ -157,7 +161,7 @@ class HitterScorer(RelationalScorer):
 
     def score_emb(
             self, s_emb: Tensor, p_emb: Tensor, o_emb: Tensor, context_s_emb: Tensor, context_p_emb: Tensor,
-            attention_mask, combine: str, num_replaced=0, num_unchanged=0
+            attention_mask, combine: str, num_replaced=0, num_masked=0, ground_truth_s: Tensor = None
     ):
         """
 
@@ -185,7 +189,7 @@ class HitterScorer(RelationalScorer):
         context_s_dim = context_s_emb.shape[2]
         context_p_dim = context_p_emb.shape[2]
 
-        s_emb[num_replaced + num_unchanged:] = self.mask_emb
+        s_emb[num_replaced : num_replaced + num_masked] = self.mask_emb
 
         attention_mask = torch.cat([attention_mask.new_ones(batch_size).unsqueeze(1), attention_mask], dim=1)
         attention_mask_flattened = attention_mask.view(batch_size * (context_size + 1))
@@ -234,20 +238,31 @@ class HitterScorer(RelationalScorer):
         else:
             out = self.context_encoder.forward(entity_out.transpose(0, 1), None, self.convert_mask_rat(attention_mask))[-1].transpose(0,1)
 
-        out = out[0, ::]
+        out = out[:2, ::]
 
         o_emb = torch.nn.functional.dropout(o_emb, self.output_dropout, training=self.training)
 
+        if self.training and self.mlm_fraction > 0.0:
+            num_mlm = round(num_masked * self.mlm_fraction)
+
+            mlm_scores = torch.mm(out[1, ::][num_replaced : num_replaced + num_mlm], o_emb.transpose(1, 0))
+            self_pred_loss = self.loss(mlm_scores, ground_truth_s[num_replaced : num_replaced + num_mlm]) / num_mlm
+        else:
+            self_pred_loss = 0
+
         # now take dot product
         if combine == "sp_":
-            out = torch.mm(out, o_emb.transpose(1, 0))
+            out = torch.mm(out[0, ::], o_emb.transpose(1, 0))
         elif combine == "spo":
-            out = (out * o_emb).sum(-1)
+            out = (out[0, ::] * o_emb).sum(-1)
         else:
             raise Exception("can't happen")
 
         # all done
-        return out.view(batch_size, -1)
+        if self.training and self.mlm_fraction > 0.0:
+            return out.view(batch_size, -1), self_pred_loss
+        else:
+            return out.view(batch_size, -1)
 
     def recover_entity_emb(self, s_emb, p_emb, context_s_emb, context_p_emb, attention_mask, num_replaced=0, num_unchanged=0):
         """

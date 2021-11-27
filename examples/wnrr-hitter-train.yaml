@@ -1,34 +1,34 @@
 job.type: train
-dataset.name: fb15k-237
+dataset.name: wnrr
 
 model: reciprocal_relations_context_model
 reciprocal_relations_context_model:
-  neighborhood_size: 50
-  drop_neighborhood_fraction: 0.3
+  neighborhood_size: 12
+  drop_neighborhood_fraction: 0.5
   base_model:
     type: hitter # redundant since also default
     neighborhood_size: 0
     encoder.dropout: 0.1
     output_dropout: 0.6
-    mlm_fraction: 0.
+    mlm_fraction: 0.6
     implementation: pytorch
-  fraction_replaced: 0.
-  fraction_masked: 0.5
+  fraction_replaced: 0.3
+  fraction_masked: 0.8
 
 
 train:
   batch_size: 512
   loss_arg: .nan
-  lr_warmup: 30
+  lr_warmup: 50
   lr_scheduler: LinearLR
   lr_scheduler_args:
     start_factor: 1
     end_factor: 0
-    total_iters: 270
-  max_epochs: 300
+    total_iters: 450
+  max_epochs: 500
   optimizer: Adamax
   optimizer_args:
-    lr: 0.01
+    lr: 0.008
     eps: 1e-6
     weight_decay: 0.01
   type: 1vsAll

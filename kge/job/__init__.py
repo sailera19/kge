@@ -3,7 +3,6 @@ from kge.job.job import Job
 from kge.job.job import TrainingOrEvaluationJob
 from kge.job.train import TrainingJob
 from kge.job.train_1vsAll import TrainingJob1vsAll
-from kge.job.train_1vsAll_masked_entity_prediction import TrainingJob1vsAllMaskedEntityPrediction
 from kge.job.train_KvsAll import TrainingJobKvsAll
 from kge.job.train_negative_sampling import TrainingJobNegativeSampling
 from kge.job.eval import EvaluationJob
