@@ -501,7 +501,7 @@ class KgeModel(KgeBase):
                 device_ids = config.get("job.device_pool")
                 if not device_ids:
                     device_ids = None
-                model = _CustomDataParallel(model, device_ids)
+                model = DataParallelKgeModel(model, device_ids)
             return model
         except:
             config.log(f"Failed to create model {model_name} (class {class_name}).")
@@ -792,14 +792,35 @@ class KgeModel(KgeBase):
             sp_scores = self._scorer.score_emb(s, p, all_objects, combine="sp_")
             po_scores = self._scorer.score_emb(all_subjects, p, o, combine="_po")
         return torch.cat((sp_scores, po_scores), dim=1)
+    
+    def forward(self, function_name, *args, **kwargs):
+
+        # call score_sp/score_po during training, score_spo/score_sp_po during inference
+        return_value = getattr(self, function_name)(*args, **kwargs)
+        return return_value
 
 
-class _CustomDataParallel(torch.nn.DataParallel):
+class DataParallelKgeModel(torch.nn.DataParallel):
     def __init__(self, model, device_ids):
-        super(_CustomDataParallel, self).__init__(model, device_ids)
+        super(DataParallelKgeModel, self).__init__(model, device_ids)
 
     def __getattr__(self, name):
         try:
-            return super(_CustomDataParallel, self).__getattr__(name)
+            return super(DataParallelKgeModel, self).__getattr__(name)
         except AttributeError:
             return getattr(self.module, name)
+
+    def score_sp(self, *args, **kwargs):
+        return self.forward("score_sp", *args, **kwargs)
+
+    def score_po(self, *args, **kwargs):
+        return self.forward("score_po", *args, **kwargs)
+
+    def score_spo(self, *args, **kwargs):
+        return self.forward("score_spo", *args, **kwargs)
+
+    def score_sp_po(self, *args, **kwargs):
+        return self.forward("score_sp_po", *args, **kwargs)
+
+    def score_so(self, *args, **kwargs):
+        return self.forward("score_so", *args, **kwargs)
