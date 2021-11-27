@@ -287,7 +287,6 @@ class Hitter(KgeModel):
             configuration_key=self.configuration_key,
             init_for_load_only=init_for_load_only,
         )
-        self.get_scorer().set_masked_entity_prediction_weights(self.get_s_embedder()._embeddings.weight)
 
     def score_spo(self, s: Tensor, p: Tensor, o: Tensor, direction=None, **kwargs) -> Tensor:
         # We overwrite this method to ensure that ConvE only predicts towards objects.
