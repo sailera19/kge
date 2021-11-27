@@ -13,9 +13,11 @@ hitter:
     type: lookup_embedder
     +++: +++
 
+  # fraction of masked to recover, 0 -> no mlm
   mlm_fraction: 0.5
 
   implementation: pytorch
+  # dropout for target embeddings before dot multiplication
   output_dropout: 0.0
 
   encoder:
@@ -28,7 +30,7 @@ hitter:
     # see torch.nn.TransformerEncoder
     entity_encoder:
       num_layers: 3                # the number of sub-encoder-layers in the encoder
-      dropout: 0.6
+      dropout: 0.1
 
     context_encoder:
       num_layers: 6                # the number of sub-encoder-layers in the encoder
