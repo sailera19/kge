@@ -212,7 +212,9 @@ class HitterScorer(RelationalScorer):
         if self.transformer_impl == "pytorch":
             entity_out[attention_mask_flattened] = self.entity_encoder.forward(entity_in)[0, :]
         else:
-            entity_out[attention_mask_flattened] = self.entity_encoder.forward(entity_in, attention_mask_flattened.new_tensor([True]).repeat(attention_mask_flattened.sum()))[-1][0, :]
+            entity_out[attention_mask_flattened] = self.entity_encoder.forward(entity_in.transpose(0,1),
+                                                                               self.convert_mask(entity_in.new_ones(attention_mask_flattened.sum(), 3, dtype=torch.long)),
+                                                                               output_all_encoded_layers=False)[-1][: ,0, :]
 
         entity_out[~attention_mask_flattened] = 0
 
@@ -230,7 +232,7 @@ class HitterScorer(RelationalScorer):
         if self.transformer_impl == "pytorch":
             out = self.context_encoder.forward(entity_out, src_key_padding_mask=~attention_mask)
         else:
-            out = self.context_encoder.forward(entity_out.transpose(0, 1), None, self.convert_mask_rat(~attention_mask))[-1].transpose(0,1)
+            out = self.context_encoder.forward(entity_out.transpose(0, 1), None, self.convert_mask_rat(attention_mask))[-1].transpose(0,1)
 
         out = out[0, ::]
 
@@ -304,6 +306,11 @@ class HitterScorer(RelationalScorer):
         attention_mask = attention_mask.unsqueeze(1).repeat(1, attention_mask.size(1), 1)
         return attention_mask
 
+    def convert_mask(self, attention_mask):
+        # extend mask to Transformer format
+        attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)
+        attention_mask = (1.0 - attention_mask.float()) * -10000.0
+        return attention_mask
 
 class Hitter(KgeModel):
     r"""Implementation of the Transformer KGE model."""
