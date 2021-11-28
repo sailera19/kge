@@ -69,7 +69,7 @@ class TrainingJob1vsAll(TrainingJob):
             scores_sp, self_pred_loss_sp = scores_sp
             loss_value_sp = self.loss(scores_sp, triples[:, 2]) / batch_size
             loss_value_sp = loss_value_sp + self_pred_loss_sp
-            result.avg_loss_self += self_pred_loss_sp
+            result.avg_loss_self += self_pred_loss_sp.item()
         else:
             loss_value_sp = self.loss(scores_sp, triples[:, 2]) / batch_size
         result.avg_loss += loss_value_sp.item()
@@ -89,7 +89,7 @@ class TrainingJob1vsAll(TrainingJob):
             scores_po, self_pred_loss_po = scores_po
             loss_value_po = self.loss(scores_po, triples[:, 2]) / batch_size
             loss_value_po = loss_value_po + self_pred_loss_po
-            result.avg_loss_self += self_pred_loss_po
+            result.avg_loss_self += self_pred_loss_po.item()
         else:
             loss_value_po = self.loss(scores_po, triples[:, 0]) / batch_size
         result.avg_loss += loss_value_po.item()

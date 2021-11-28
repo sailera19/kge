@@ -36,19 +36,10 @@ class KgeContextModel(KgeModel):
         else:
             self.drop_neighborhood_fraction = 0
 
-        if self.has_option("fraction_replaced"):
-            self.fraction_replaced = self.get_option("fraction_replaced")
-        else:
-            self.fraction_replaced = 0
-
-        if self.has_option("fraction_replaced"):
-            self.fraction_masked = self.get_option("fraction_masked")
-        else:
-            self.fraction_masked = 0
-
-        # initialize context
         if self.has_option("neighborhood_size"):
             self.neighborhood_size = self.get_option("neighborhood_size")
+
+        self.context_implementation = self.get_option("context_implementation")
 
 
 
@@ -75,12 +66,7 @@ class KgeContextModel(KgeModel):
 
         context_s, context_p, attention_mask = self.embed_context(s, p, ground_truth, drop_neighborhood_fraction=self.drop_neighborhood_fraction)
 
-        num_masked, num_replaced = self._get_masked_replaced(s)
-
         s_emb = s.clone()
-
-        if num_replaced > 0:
-            s_emb[:num_replaced] = torch.randint(low=0, high=s_embedder.vocab_size, size=(num_replaced,))
 
         s_emb = s_embedder.embed(s)
         p = self.get_p_embedder().embed(p)
@@ -89,7 +75,7 @@ class KgeContextModel(KgeModel):
         else:
             o = self.get_o_embedder().embed(o)
 
-        return self._scorer.score_emb(s_emb, p, o, context_s, context_p, attention_mask, combine="sp_", num_replaced=num_replaced, num_masked=num_masked, ground_truth_s=s)
+        return self._scorer.score_emb(s_emb, p, o, context_s, context_p, attention_mask, combine="sp_", ground_truth_s=s)
 
 
 
@@ -99,19 +85,15 @@ class KgeContextModel(KgeModel):
         else:
             s = self.get_s_embedder().embed(s)
 
-        num_masked, num_replaced = self._get_masked_replaced(o)
-
         o_embedder = self.get_o_embedder()
 
         context_o, context_p, attention_mask = self.embed_context(o, p, ground_truth, s_embedder=o_embedder, drop_neighborhood_fraction=self.drop_neighborhood_fraction)
 
         o_emb = o.clone()
-        if num_replaced > 0:
-            o_emb[:num_replaced] = torch.randint(low=0, high=o_embedder.vocab_size, size=(num_replaced,))
 
         p = self.get_p_embedder().embed(p)
         o_emb = self.get_o_embedder().embed(o_emb)
-        return self._scorer.score_emb(o_emb, p, s, context_o, context_p, attention_mask, combine="sp_", num_replaced=num_replaced, num_masked=num_masked, ground_truth_s=o)
+        return self._scorer.score_emb(o_emb, p, s, context_o, context_p, attention_mask, combine="sp_", ground_truth_s=o)
 
 
     def score_spo(self, s: Tensor, p: Tensor, o: Tensor, direction=None, ground_truth=None, **kwargs) -> Tensor:
@@ -174,15 +156,20 @@ class KgeContextModel(KgeModel):
 
         if self.training:
             # mask out ground truth during training to avoid overfitting
-            # bug in original hitter? not masking out reciprocal
-            #gt_mask = ((entity_ids != ground_truth.view(batch_size, 1)) | (relation_ids != p.view(batch_size, 1)))
-            gt_mask = ((entity_ids != ground_truth.view(batch_size, 1)) |
-                       (
-                        (relation_ids != p.view(batch_size, 1)) &
-                        ((relation_ids - self.dataset.num_relations()) != p.view(batch_size, 1)) &
-                        ((relation_ids + self.dataset.num_relations()) != p.view(batch_size, 1))
-                        )
-                       )
+            # else is filtering out relations to the entity itself as well.
+            if self.context_implementation == "hitter":
+                gt_mask = ((entity_ids != ground_truth.view(batch_size, 1)) | (
+                            ((relation_ids - self.dataset.num_relations()) != p.view(batch_size, 1)) &
+                            ((relation_ids + self.dataset.num_relations()) != p.view(batch_size, 1))
+                            ))
+            else:
+                gt_mask = ((entity_ids != ground_truth.view(batch_size, 1)) |
+                           (
+                            (relation_ids != p.view(batch_size, 1)) &
+                            ((relation_ids - self.dataset.num_relations()) != p.view(batch_size, 1)) &
+                            ((relation_ids + self.dataset.num_relations()) != p.view(batch_size, 1))
+                            )
+                           )
             ctx_random_mask = (attention_mask
                                .new_ones((batch_size, self.neighborhood_size))
                                .bernoulli_(1 - drop_neighborhood_fraction))
@@ -203,12 +190,4 @@ class KgeContextModel(KgeModel):
 
         return context_s, context_p, attention_mask
 
-    def _get_masked_replaced(self, s):
-        if self.training:
-            batch_size = len(s)
-            num_masked = round(batch_size * self.fraction_masked)
-            num_replaced = round((batch_size - num_masked) * self.fraction_replaced)
 
-            return num_masked, num_replaced
-        else:
-            return 0, 0

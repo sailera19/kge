@@ -5,20 +5,21 @@ model: reciprocal_relations_context_model
 reciprocal_relations_context_model:
   neighborhood_size: 12
   drop_neighborhood_fraction: 0.5
+  context_implementation: hitter
   base_model:
     type: hitter # redundant since also default
     neighborhood_size: 0
-    encoder.dropout: 0.1
     output_dropout: 0.6
-    mlm_fraction: 0.6
     implementation: pytorch
-  fraction_replaced: 0.3
-  fraction_masked: 0.8
+    entity_dropout: 0.8
+    entity_dropout_masked: 0.6
+    entity_dropout_replaced: 0.3
+    add_mlm_loss: True
 
 
 train:
   batch_size: 512
-  loss_arg: .nan
+  loss_arg: .1
   lr_warmup: 50
   lr_scheduler: LinearLR
   lr_scheduler_args:

@@ -81,20 +81,16 @@ class ReciprocalRelationsContextModel(KgeContextModel):
 
         o_embedder = self.get_o_embedder()
 
-        num_masked, num_replaced = self._get_masked_replaced(o)
-
         context_o, context_p, attention_mask = self.embed_context(o,
                                                                   p + self.dataset.num_relations(),
                                                                   ground_truth,
                                                                   s_embedder=o_embedder,
                                                                   drop_neighborhood_fraction=self.drop_neighborhood_fraction)
         o_emb = o.clone()
-        if num_replaced > 0:
-            o_emb[:num_replaced] = torch.randint(low=0, high=o_embedder.vocab_size, size=(num_replaced,))
 
         p = self.get_p_embedder().embed(p + self.dataset.num_relations())
         o_emb = self.get_o_embedder().embed(o_emb)
-        return self._scorer.score_emb(o_emb, p, s, context_o, context_p, attention_mask, combine="sp_", num_replaced=num_replaced, num_masked=num_masked, ground_truth_s=o)
+        return self._scorer.score_emb(o_emb, p, s, context_o, context_p, attention_mask, combine="sp_", ground_truth_s=o)
 
     def score_so(self, s, o, p=None, **kwargs):
         raise Exception("The reciprocal relations model cannot score relations.")

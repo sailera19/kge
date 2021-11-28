@@ -8,12 +8,12 @@ reciprocal_relations_context_model:
   base_model:
     type: hitter # redundant since also default
     neighborhood_size: 0
-    encoder.dropout: 0.1
     output_dropout: 0.6
-    mlm_fraction: 0.
     implementation: pytorch
-  fraction_replaced: 0.
-  fraction_masked: 0.5
+    entity_dropout: 0.5
+    entity_dropout_masked: 1.0
+    entity_dropout_replaced: 0.0
+    add_mlm_loss: False
 
 
 train:

@@ -10,11 +10,11 @@ reciprocal_relations_context_model:
   # Fraction of neighborhood that is randomly dropped (masked)
   # fraction on batch level, not on per entry level
   drop_neighborhood_fraction: 0.3
-  # fraction of entities that will be masked
-  fraction_masked: 0.
-  # fraction of not masked entities that will be replaced.
-  # E.g., if 0.5 are masked and fraction_recplaed is 0.5, the actual fraction of replaced is 0.25
-  fraction_replaced: 0.
+
+  # context algorithm. Available: hitter, hitter_reciprocalfixed
+  # Hitter does not mask out the reciprocal ground truth.
+  context_implementation: hitter_reciprocalfixed
+
   base_model:
     type: conve
     +++: +++

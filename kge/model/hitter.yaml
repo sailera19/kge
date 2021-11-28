@@ -13,18 +13,29 @@ hitter:
     type: lookup_embedder
     +++: +++
 
-  # fraction of masked to recover, 0 -> no mlm
-  mlm_fraction: 0.5
-
   implementation: pytorch
   # dropout for target embeddings before dot multiplication
   output_dropout: 0.0
+
+  # fraction of dataset that will be used for dropout, no actual masking or replacing
+  entity_dropout: 0.0
+  # fraction of dropout to be masked
+  entity_dropout_masked: 0.0
+  # fraction of dropout to be replaced, fraction of whole dropout but masked will not be replaced
+  entity_dropout_replaced: 0.0
+
+  # Whether or not to include mlm loss calculated on entity_dropout sample
+  add_mlm_loss: False
+
+  # loss type for self loss, same configuration as in train.loss
+  loss: kl
+  # loss arg for self loss, same configuration as in train.loss_arg
+  loss_arg:  .nan
 
   encoder:
     # see torch.nn.TransformerEncodeLayer
     nhead: 8                     # the number of heads
     dim_feedforward: 1280        # the dimension of the feedforward network model
-    dropout: 0.1
     activation: gelu             # relu or gelu
 
     # see torch.nn.TransformerEncoder
