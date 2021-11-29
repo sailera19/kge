@@ -211,31 +211,30 @@ class HitterScorer(RelationalScorer):
                 self.cls_emb.repeat((attention_mask.sum(), 1)),
                 torch.cat([s_emb.view(batch_size, 1, context_s_dim), context_s_emb], dim=1).view(
                     (batch_size * (context_size + 1), context_s_dim))[
-                    attention_mask_flattened],
+                    attention_mask_flattened] + self.sub_type_emb.unsqueeze(0),
                 torch.cat([p_emb.view(batch_size, 1, context_p_dim), context_p_emb], dim=1).view(
                     (batch_size * (context_size + 1), context_s_dim))[
-                    attention_mask_flattened],
+                    attention_mask_flattened] + self.rel_type_emb.unsqueeze(0),
             ),
             dim=0,
         )
-
-        entity_in[:, 1] += self.sub_type_emb
-        entity_in[:, 2] += self.rel_type_emb
 
         entity_in = torch.nn.functional.dropout(entity_in, p=self.output_dropout, training=self.training)
 
         entity_in = self.entity_layer_norm(entity_in)
 
-        entity_out = s_emb.new_empty((batch_size, (context_size + 1), context_s_dim))
+        entity_out = s_emb.new_empty((batch_size * (context_size + 1), context_s_dim))
 
         if self.transformer_impl == "pytorch":
-            entity_out[attention_mask] = self.entity_encoder.forward(entity_in)[0, :]
+            entity_out[attention_mask_flattened] = self.entity_encoder.forward(entity_in)[0, :]
         else:
-            entity_out[attention_mask] = self.entity_encoder.forward(entity_in.transpose(0,1),
+            entity_out[attention_mask_flattened] = self.entity_encoder.forward(entity_in.transpose(0,1),
                                                                                self.convert_mask(entity_in.new_ones(attention_mask_flattened.sum(), 3, dtype=torch.long)),
                                                                                output_all_encoded_layers=False)[-1][: ,0, :]
 
-        entity_out = entity_out.transpose(0, 1)
+        entity_out[~attention_mask_flattened] = 0
+
+        entity_out = torch.transpose(entity_out.view((batch_size, context_size + 1, context_s_dim)), 0, 1)
 
         entity_out = torch.cat([self.gcls_emb.repeat((batch_size, 1)).unsqueeze(0), entity_out])
         entity_out[0, :] += self.gcls_type_emb
