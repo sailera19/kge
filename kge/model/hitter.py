@@ -74,9 +74,17 @@ class HitterScorer(RelationalScorer):
         self.entity_encoder_dropout = self.get_option("encoder.entity_encoder.dropout")
         self.context_encoder_dropout = self.get_option("encoder.context_encoder.dropout")
 
-        self.entity_layer_norm = torch.nn.LayerNorm(self.emb_dim, eps=1e-12)
-        self.context_layer_norm = torch.nn.LayerNorm(self.emb_dim, eps=1e-12)
         self.transformer_impl = self.get_option("implementation")
+
+        self.layer_norm_impl = self.get_option("layer_norm_implementation")
+
+        if self.layer_norm_impl == "BERT":
+            self.context_layer_norm = BertLayerNorm(self.emb_dim, eps=1e-12)
+            self.entity_layer_norm = BertLayerNorm(self.emb_dim, eps=1e-12)
+        else:
+            self.entity_layer_norm = torch.nn.LayerNorm(self.emb_dim, eps=1e-05)
+            self.context_layer_norm = torch.nn.LayerNorm(self.emb_dim, eps=1e-05)
+
 
         if self.transformer_impl == "pytorch":
             self.entity_encoder_layer = torch.nn.TransformerEncoderLayer(
@@ -139,7 +147,6 @@ class HitterScorer(RelationalScorer):
                 self.get_option("encoder.context_encoder.num_layers"),
                 self.get_option("initialize_args.std"),
                 tie_layers=False)
-
             config = BertConfig(0, hidden_size=self.emb_dim,
                                 num_hidden_layers=self.get_option("encoder.entity_encoder.num_layers"),
                                 num_attention_heads=self.get_option("encoder.nhead"),
@@ -204,33 +211,34 @@ class HitterScorer(RelationalScorer):
                 self.cls_emb.repeat((attention_mask.sum(), 1)),
                 torch.cat([s_emb.view(batch_size, 1, context_s_dim), context_s_emb], dim=1).view(
                     (batch_size * (context_size + 1), context_s_dim))[
-                    attention_mask_flattened] + self.sub_type_emb.unsqueeze(0),
+                    attention_mask_flattened],
                 torch.cat([p_emb.view(batch_size, 1, context_p_dim), context_p_emb], dim=1).view(
                     (batch_size * (context_size + 1), context_s_dim))[
-                    attention_mask_flattened] + self.rel_type_emb.unsqueeze(0),
+                    attention_mask_flattened],
             ),
             dim=0,
         )
 
-        entity_in = torch.nn.functional.dropout(entity_in, p=self.entity_encoder_dropout, training=self.training)
+        entity_in[:, 1] += self.sub_type_emb
+        entity_in[:, 2] += self.rel_type_emb
+
+        entity_in = torch.nn.functional.dropout(entity_in, p=self.output_dropout, training=self.training)
 
         entity_in = self.entity_layer_norm(entity_in)
 
-        entity_out = s_emb.new_empty((batch_size * (context_size + 1), context_s_dim))
+        entity_out = s_emb.new_empty((batch_size, (context_size + 1), context_s_dim))
 
         if self.transformer_impl == "pytorch":
-            entity_out[attention_mask_flattened] = self.entity_encoder.forward(entity_in)[0, :]
+            entity_out[attention_mask] = self.entity_encoder.forward(entity_in)[0, :]
         else:
-            entity_out[attention_mask_flattened] = self.entity_encoder.forward(entity_in.transpose(0,1),
+            entity_out[attention_mask] = self.entity_encoder.forward(entity_in.transpose(0,1),
                                                                                self.convert_mask(entity_in.new_ones(attention_mask_flattened.sum(), 3, dtype=torch.long)),
                                                                                output_all_encoded_layers=False)[-1][: ,0, :]
 
-        entity_out[~attention_mask_flattened] = 0
-
-        entity_out = torch.transpose(entity_out.view((batch_size, context_size + 1, context_s_dim)), 0, 1)
+        entity_out = entity_out.transpose(0, 1)
 
         entity_out = torch.cat([self.gcls_emb.repeat((batch_size, 1)).unsqueeze(0), entity_out])
-        entity_out[0, :] += self.gcls_type_emb2
+        entity_out[0, :] += self.gcls_type_emb
         entity_out[1, :] += self.src_type_emb
         entity_out[2:, :] += self.context_type_emb
 

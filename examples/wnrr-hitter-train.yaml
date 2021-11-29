@@ -11,6 +11,7 @@ reciprocal_relations_context_model:
     neighborhood_size: 0
     output_dropout: 0.6
     implementation: pytorch
+    layer_norm_implementation: BERT
     entity_dropout: 0.8
     entity_dropout_masked: 0.6
     entity_dropout_replaced: 0.3

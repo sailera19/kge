@@ -14,6 +14,7 @@ hitter:
     +++: +++
 
   implementation: pytorch
+  layer_norm_implementation: pytorch
   # dropout for target embeddings before dot multiplication
   output_dropout: 0.0
 
