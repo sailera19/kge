@@ -87,7 +87,7 @@ class TrainingJob1vsAll(TrainingJob):
             ground_truth=triples[:, 0])
         if isinstance(scores_po, tuple):
             scores_po, self_pred_loss_po = scores_po
-            loss_value_po = self.loss(scores_po, triples[:, 2]) / batch_size
+            loss_value_po = self.loss(scores_po, triples[:, 0]) / batch_size
             loss_value_po = loss_value_po + self_pred_loss_po
             result.avg_loss_self += self_pred_loss_po.item()
         else:
