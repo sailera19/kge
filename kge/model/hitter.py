@@ -35,6 +35,11 @@ class HitterScorer(RelationalScorer):
         super().__init__(config, dataset, configuration_key)
         self.emb_dim = self.get_option("entity_embedder.dim")
 
+        self.feedforward_dim = self.get_option("encoder.dim_feedforward")
+        if not self.feedforward_dim:
+            # set ff dim to 4 times of embeddings dim, as in Vaswani 2017 and Devlin 2019
+            self.feedforward_dim = self.emb_dim * 4
+
         # TODO: change when KgeLoss gets more generic
         selfloss_config = Config()
         selfloss_config.set("train.loss", self.get_option("loss"))
@@ -65,14 +70,14 @@ class HitterScorer(RelationalScorer):
         self.mask_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.mask_emb)
 
-        self.add_mlm_loss = self.get_option("add_mlm_loss")
         self.output_dropout = self.get_option("output_dropout")
+        self.hidden_dropout = self.get_option("hidden_dropout")
+
+        self.add_mlm_loss = self.get_option("add_mlm_loss")
         self.entity_dropout = self.get_option("entity_dropout")
         self.entity_dropout_masked = self.get_option("entity_dropout_masked")
         self.entity_dropout_replaced = self.get_option("entity_dropout_replaced")
 
-        self.entity_encoder_dropout = self.get_option("encoder.entity_encoder.dropout")
-        self.context_encoder_dropout = self.get_option("encoder.context_encoder.dropout")
 
         self.transformer_impl = self.get_option("implementation")
 
@@ -87,15 +92,15 @@ class HitterScorer(RelationalScorer):
 
 
         if self.transformer_impl == "pytorch":
-            self.entity_encoder_layer = torch.nn.TransformerEncoderLayer(
+            entity_encoder_layer = torch.nn.TransformerEncoderLayer(
                 d_model=self.emb_dim,
                 nhead=self.get_option("encoder.nhead"),
-                dim_feedforward=self.get_option("encoder.dim_feedforward"),
-                dropout=self.entity_encoder_dropout,
+                dim_feedforward=self.feedforward_dim,
+                dropout=self.hidden_dropout,
                 activation=self.get_option("encoder.activation"),
             )
             self.entity_encoder = torch.nn.TransformerEncoder(
-                self.entity_encoder_layer, num_layers=self.get_option("encoder.entity_encoder.num_layers")
+                entity_encoder_layer, num_layers=self.get_option("encoder.entity_encoder.num_layers")
             )
             for layer in self.entity_encoder.layers:
                 self.initialize(layer.linear1.weight.data)
@@ -109,15 +114,15 @@ class HitterScorer(RelationalScorer):
                     self.initialize(layer.self_attn.k_proj_weight)
                     self.initialize(layer.self_attn.v_proj_weight)
 
-            self.context_encoder_layer = torch.nn.TransformerEncoderLayer(
+            context_encoder_layer = torch.nn.TransformerEncoderLayer(
                 d_model=self.emb_dim,
                 nhead=self.get_option("encoder.nhead"),
-                dim_feedforward=self.get_option("encoder.dim_feedforward"),
-                dropout=self.context_encoder_dropout,
+                dim_feedforward=self.feedforward_dim,
+                dropout=self.hidden_dropout,
                 activation=self.get_option("encoder.activation"),
             )
             self.context_encoder = torch.nn.TransformerEncoder(
-                self.context_encoder_layer, num_layers=self.get_option("encoder.context_encoder.num_layers")
+                context_encoder_layer, num_layers=self.get_option("encoder.context_encoder.num_layers")
             )
             for layer in self.context_encoder.layers:
                 self.initialize(layer.linear1.weight.data)
@@ -137,23 +142,23 @@ class HitterScorer(RelationalScorer):
                     rat.MultiHeadedAttentionWithRelations(
                         self.get_option("encoder.nhead"),
                         self.emb_dim,
-                        self.context_encoder_dropout),
+                        self.hidden_dropout),
                     rat.PositionwiseFeedForward(
                         self.emb_dim,
-                        self.get_option("encoder.dim_feedforward"),
-                        self.context_encoder_dropout),
+                        self.feedforward_dim,
+                        self.hidden_dropout),
                     num_relation_kinds=0,
-                    dropout=self.context_encoder_dropout),
+                    dropout=self.hidden_dropout),
                 self.get_option("encoder.context_encoder.num_layers"),
                 self.get_option("initialize_args.std"),
                 tie_layers=False)
             config = BertConfig(0, hidden_size=self.emb_dim,
                                 num_hidden_layers=self.get_option("encoder.entity_encoder.num_layers"),
                                 num_attention_heads=self.get_option("encoder.nhead"),
-                                intermediate_size=self.get_option("encoder.dim_feedforward"),
+                                intermediate_size=self.feedforward_dim,
                                 hidden_act=self.get_option("encoder.activation"),
-                                hidden_dropout_prob=self.entity_encoder_dropout,
-                                attention_probs_dropout_prob=self.entity_encoder_dropout,
+                                hidden_dropout_prob=self.hidden_dropout,
+                                attention_probs_dropout_prob=self.hidden_dropout,
                                 max_position_embeddings=0,  # no effect
                                 type_vocab_size=0,  # no effect
                                 initializer_range=self.get_option("initialize_args.std"))
@@ -202,19 +207,13 @@ class HitterScorer(RelationalScorer):
                 torch.randint(len(o_emb), (replaced_sample.sum(),), device=attention_mask.device)
             ]
 
-
         attention_mask = torch.cat([attention_mask.new_ones(batch_size).unsqueeze(1), attention_mask], dim=1)
-        attention_mask_flattened = attention_mask.view(batch_size * (context_size + 1))
 
         entity_in = torch.stack(
             (
                 self.cls_emb.repeat((attention_mask.sum(), 1)),
-                torch.cat([s_emb.view(batch_size, 1, context_s_dim), context_s_emb], dim=1).view(
-                    (batch_size * (context_size + 1), context_s_dim))[
-                    attention_mask_flattened] + self.sub_type_emb.unsqueeze(0),
-                torch.cat([p_emb.view(batch_size, 1, context_p_dim), context_p_emb], dim=1).view(
-                    (batch_size * (context_size + 1), context_s_dim))[
-                    attention_mask_flattened] + self.rel_type_emb.unsqueeze(0),
+                torch.cat([s_emb.view(batch_size, 1, context_s_dim), context_s_emb], dim=1)[attention_mask] + self.sub_type_emb.unsqueeze(0),
+                torch.cat([p_emb.view(batch_size, 1, context_p_dim), context_p_emb], dim=1)[attention_mask] + self.rel_type_emb.unsqueeze(0),
             ),
             dim=0,
         )
@@ -223,25 +222,24 @@ class HitterScorer(RelationalScorer):
 
         entity_in = self.entity_layer_norm(entity_in)
 
-        entity_out = s_emb.new_empty((batch_size * (context_size + 1), context_s_dim))
+        entity_out = s_emb.new_empty((batch_size, (context_size + 1), context_s_dim))
 
         if self.transformer_impl == "pytorch":
-            entity_out[attention_mask_flattened] = self.entity_encoder.forward(entity_in)[0, :]
+            entity_out[attention_mask] = self.entity_encoder.forward(entity_in)[0, :]
         else:
-            entity_out[attention_mask_flattened] = self.entity_encoder.forward(entity_in.transpose(0,1),
-                                                                               self.convert_mask(entity_in.new_ones(attention_mask_flattened.sum(), 3, dtype=torch.long)),
+            entity_out[attention_mask] = self.entity_encoder.forward(entity_in.transpose(0, 1),
+                                                                               self.convert_mask(entity_in.new_ones(attention_mask.sum(), 3, dtype=torch.long)),
                                                                                output_all_encoded_layers=False)[-1][: ,0, :]
 
-        entity_out[~attention_mask_flattened] = 0
-
-        entity_out = torch.transpose(entity_out.view((batch_size, context_size + 1, context_s_dim)), 0, 1)
+        entity_out[~attention_mask] = 0
+        entity_out = entity_out.transpose(0, 1)
 
         entity_out = torch.cat([self.gcls_emb.repeat((batch_size, 1)).unsqueeze(0), entity_out])
         entity_out[0, :] += self.gcls_type_emb
         entity_out[1, :] += self.src_type_emb
         entity_out[2:, :] += self.context_type_emb
 
-        entity_out = torch.nn.functional.dropout(entity_out, p=self.context_encoder_dropout, training=self.training)
+        entity_out = torch.nn.functional.dropout(entity_out, p=self.hidden_dropout, training=self.training)
         entity_out = self.context_layer_norm(entity_out)
 
         attention_mask = torch.cat([attention_mask.new_ones(batch_size).unsqueeze(1), attention_mask], dim=1)

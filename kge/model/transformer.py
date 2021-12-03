@@ -47,7 +47,7 @@ class TransformerScorer(RelationalScorer):
                 )
                 dropout = 0.0
 
-        self.encoder_layer = torch.nn.TransformerEncoderLayer(
+        encoder_layer = torch.nn.TransformerEncoderLayer(
             d_model=self.emb_dim,
             nhead=self.get_option("encoder.nhead"),
             dim_feedforward=self.get_option("encoder.dim_feedforward"),
@@ -55,7 +55,7 @@ class TransformerScorer(RelationalScorer):
             activation=self.get_option("encoder.activation"),
         )
         self.encoder = torch.nn.TransformerEncoder(
-            self.encoder_layer, num_layers=self.get_option("encoder.num_layers")
+            encoder_layer, num_layers=self.get_option("encoder.num_layers")
         )
         for layer in self.encoder.layers:
             self.initialize(layer.linear1.weight.data)
