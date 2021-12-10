@@ -69,14 +69,14 @@ class ReciprocalRelationsModel(KgeModel):
                 "undirected spo scores."
             )
 
-    def score_po(self, p, o, s=None, **kwargs):
+    def score_po(self, p, o, s=None, ground_truth=None, **kwargs):
         if s is None:
-            s = self.get_s_embedder().embed_all()
+            s_emb = self.get_s_embedder().embed_all()
         else:
-            s = self.get_s_embedder().embed(s)
-        p = self.get_p_embedder().embed(p + self.dataset.num_relations())
-        o = self.get_o_embedder().embed(o)
-        return self._scorer.score_emb(o, p, s, combine="sp_")
+            s_emb = self.get_s_embedder().embed(s)
+        p_emb = self.get_p_embedder().embed(p + self.dataset.num_relations())
+        o_emb = self.get_o_embedder().embed(o)
+        return self._scorer.score_emb(o_emb, p_emb, s_emb, combine="sp_", ground_truth_s=o, ground_truth_p=p + self.dataset.num_relations(), ground_truth_o=ground_truth)
 
     def score_so(self, s, o, p=None, **kwargs):
         raise Exception("The reciprocal relations model cannot score relations.")
@@ -89,17 +89,29 @@ class ReciprocalRelationsModel(KgeModel):
         entity_subset: torch.Tensor = None,
         **kwargs,
     ) -> torch.Tensor:
-        s = self.get_s_embedder().embed(s)
-        p_inv = self.get_p_embedder().embed(p + self.dataset.num_relations())
-        p = self.get_p_embedder().embed(p)
-        o = self.get_o_embedder().embed(o)
+        s_emb = self.get_s_embedder().embed(s)
+        p_inv_emb = self.get_p_embedder().embed(p + self.dataset.num_relations())
+        p_emb = self.get_p_embedder().embed(p)
+        o_emb = self.get_o_embedder().embed(o)
         if self.get_s_embedder() is self.get_o_embedder():
             if entity_subset is not None:
                 all_entities = self.get_s_embedder().embed(entity_subset)
             else:
                 all_entities = self.get_s_embedder().embed_all()
-            sp_scores = self._scorer.score_emb(s, p, all_entities, combine="sp_")
-            po_scores = self._scorer.score_emb(o, p_inv, all_entities, combine="sp_")
+            sp_scores = self._scorer.score_emb(s_emb,
+                                               p_emb,
+                                               all_entities,
+                                               combine="sp_",
+                                               ground_truth_s=s,
+                                               ground_truth_p=p,
+                                               ground_truth_o=o)
+            po_scores = self._scorer.score_emb(o_emb,
+                                               p_inv_emb,
+                                               all_entities,
+                                               combine="sp_",
+                                               ground_truth_s=o,
+                                               ground_truth_p=p + self.dataset.num_relations(),
+                                               ground_truth_o=s)
         else:
             if entity_subset is not None:
                 all_objects = self.get_o_embedder().embed(entity_subset)

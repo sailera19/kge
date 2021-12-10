@@ -193,9 +193,9 @@ class BCEWithLogitsKgeLoss(KgeLoss):
 class KLDivWithSoftmaxKgeLoss(KgeLoss):
     def __init__(self, config, reduction="sum", label_smoothing=float('nan'), **kwargs):
         super().__init__(config)
-        if not math.isnan(label_smoothing):
+        if not math.isnan(label_smoothing) and label_smoothing > 0:
             # TODO: remove assert
-            assert 0.0 < label_smoothing <= 1.0
+            assert label_smoothing <= 1.0
             self.tgt_vocab_size = config.get("dataset.num_entities")
             self.smoothing_value = label_smoothing / (self.tgt_vocab_size - 1)
             self.confidence = 1.0 - label_smoothing

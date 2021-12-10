@@ -12,7 +12,7 @@ class TransEScorer(RelationalScorer):
         super().__init__(config, dataset, configuration_key)
         self._norm = self.get_option("l_norm")
 
-    def score_emb(self, s_emb, p_emb, o_emb, combine: str):
+    def score_emb(self, s_emb, p_emb, o_emb, combine: str, **kwargs):
         n = p_emb.size(0)
         if combine == "spo":
             out = -F.pairwise_distance(s_emb + p_emb, o_emb, p=self._norm)

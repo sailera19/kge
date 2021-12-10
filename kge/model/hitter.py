@@ -4,9 +4,8 @@ from torch import Tensor
 import math
 
 from kge import Config, Dataset
-from kge.model.kge_context_model import KgeContextModel
-from kge.model.kge_model import RelationalScorer, KgeModel
-from kge.util import rat, KgeLoss
+from kge.model.kge_model import RelationalScorer, KgeModel, KgeEmbedder
+from kge.util import rat, KgeLoss, sc
 
 from pytorch_pretrained_bert.modeling import BertEncoder, BertConfig, BertLayerNorm, BertPreTrainedModel
 
@@ -31,9 +30,24 @@ class HitterScorer(RelationalScorer):
 
     """
 
-    def __init__(self, config: Config, dataset: Dataset, configuration_key=None, embedding_weights=None):
+    def __init__(self, config: Config, dataset: Dataset, configuration_key=None):
         super().__init__(config, dataset, configuration_key)
         self.emb_dim = self.get_option("entity_embedder.dim")
+        self.s_embedder: KgeEmbedder = None
+        self.p_embedder: KgeEmbedder = None
+        self.o_embedder: KgeEmbedder = None
+
+        if self.has_option("drop_neighborhood_fraction"):
+            self.drop_neighborhood_fraction = self.get_option("drop_neighborhood_fraction")
+        else:
+            self.drop_neighborhood_fraction = 0
+
+        if self.has_option("neighborhood_size"):
+            self.neighborhood_size = self.get_option("neighborhood_size")
+        else:
+            self.neighborhood_size = 0
+
+        self.context_implementation = self.get_option("context_implementation")
 
         self.feedforward_dim = self.get_option("encoder.dim_feedforward")
         if not self.feedforward_dim:
@@ -166,9 +180,13 @@ class HitterScorer(RelationalScorer):
             self.entity_encoder.config = config
             self.entity_encoder.apply(partial(BertPreTrainedModel.init_bert_weights, self.entity_encoder))
 
+    def set_embedders(self, s_embedder, p_embedder, o_embedder):
+        self.s_embedder = s_embedder
+        self.p_embedder = p_embedder
+        self.o_embedder = o_embedder
+
     def score_emb(
-            self, s_emb: Tensor, p_emb: Tensor, o_emb: Tensor, context_s_emb: Tensor, context_p_emb: Tensor,
-            attention_mask, combine: str, ground_truth_s: Tensor = None
+            self, s_emb: Tensor, p_emb: Tensor, o_emb: Tensor, combine: str, ground_truth_s: Tensor, ground_truth_p: Tensor, ground_truth_o: Tensor,
     ):
         """
 
@@ -191,6 +209,8 @@ class HitterScorer(RelationalScorer):
             )
 
         # transform the sp pairs
+        context_s_emb, context_p_emb, attention_mask = self.embed_context(ground_truth_s, ground_truth_p, ground_truth_o)
+
         batch_size = len(s_emb)
         context_size = context_s_emb.shape[1]
         context_s_dim = context_s_emb.shape[2]
@@ -287,6 +307,76 @@ class HitterScorer(RelationalScorer):
         attention_mask = (1.0 - attention_mask.float()) * -10000.0
         return attention_mask
 
+    def embed_context(self, s, p, ground_truth, s_embedder=None, p_embedder=None):
+        if not s_embedder:
+            s_embedder = self.s_embedder
+        if not p_embedder:
+            p_embedder = self.p_embedder
+
+        if not s.dtype == torch.int64:
+            s = s.long()
+
+        if not p.dtype == torch.int64:
+            p = p.long()
+
+        device = s.device
+        batch_size = len(s)
+
+        ctx_list, ctx_size = self.dataset.index('neighbor')
+        ctx_ids = ctx_list[s].to(device).transpose(1, 2)
+        ctx_size = ctx_size[s].to(device)
+
+        # sample neighbors unifromly during training
+        if self.training:
+            perm_vector = sc.get_randperm_from_lengths(ctx_size, ctx_ids.size(1))
+            ctx_ids = torch.gather(ctx_ids, 1, perm_vector.unsqueeze(-1).expand_as(ctx_ids))
+
+        # [bs, length, 2]
+        ctx_ids = ctx_ids[:, :self.neighborhood_size]
+        ctx_size[ctx_size > self.neighborhood_size] = self.neighborhood_size
+
+        # [bs, max_ctx_size]
+        entity_ids = ctx_ids[...,0]
+        relation_ids = ctx_ids[...,1]
+
+        attention_mask = sc.get_mask_from_sequence_lengths(ctx_size, self.neighborhood_size)
+
+        if self.training:
+            # mask out ground truth during training to avoid overfitting
+            # else is filtering out relations to the entity itself as well.
+            if self.context_implementation == "hitter":
+                gt_mask = ((entity_ids != ground_truth.view(batch_size, 1)) | (
+                            ((relation_ids - self.dataset.num_relations()) != p.view(batch_size, 1)) &
+                            ((relation_ids + self.dataset.num_relations()) != p.view(batch_size, 1))
+                            ))
+            else:
+                gt_mask = ((entity_ids != ground_truth.view(batch_size, 1)) |
+                           (
+                            (relation_ids != p.view(batch_size, 1)) &
+                            ((relation_ids - self.dataset.num_relations()) != p.view(batch_size, 1)) &
+                            ((relation_ids + self.dataset.num_relations()) != p.view(batch_size, 1))
+                            )
+                           )
+            ctx_random_mask = (attention_mask
+                               .new_ones((batch_size, self.neighborhood_size))
+                               .bernoulli_(1 - self.drop_neighborhood_fraction))
+            attention_mask = attention_mask & ctx_random_mask & gt_mask
+
+        context_s = torch.empty((batch_size * self.neighborhood_size, s_embedder.dim), device=device)
+        context_p = torch.empty((batch_size * self.neighborhood_size, p_embedder.dim), device=device)
+        context_s[attention_mask.view(batch_size * self.neighborhood_size)] = s_embedder.embed(entity_ids[attention_mask])
+        context_p[attention_mask.view(batch_size * self.neighborhood_size)] = p_embedder.embed(relation_ids[attention_mask])
+
+        context_s[~attention_mask.view(batch_size * self.neighborhood_size)] = 0
+        context_p[~attention_mask.view(batch_size * self.neighborhood_size)] = 0
+
+        context_s = context_s.view(batch_size, self.neighborhood_size, s_embedder.dim)
+        context_p = context_p.view(batch_size, self.neighborhood_size, p_embedder.dim)
+
+        return context_s, context_p, attention_mask
+
+
+
 class Hitter(KgeModel):
     r"""Implementation of the Transformer KGE model."""
 
@@ -305,6 +395,7 @@ class Hitter(KgeModel):
             configuration_key=self.configuration_key,
             init_for_load_only=init_for_load_only,
         )
+        self.get_scorer().set_embedders(self.get_s_embedder(), self.get_p_embedder(), self.get_o_embedder())
 
     def score_spo(self, s: Tensor, p: Tensor, o: Tensor, direction=None, **kwargs) -> Tensor:
         # We overwrite this method to ensure that ConvE only predicts towards objects.

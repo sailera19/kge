@@ -199,7 +199,7 @@ class TrmEScorer(RelationalScorer):
         else:
             return target_scores
 
-    def score_emb(self, s_emb, p_emb, o_emb, combine: str, s, o, gt_ent=None, gt_rel=None):
+    def score_emb(self, s_emb, p_emb, o_emb, combine: str, s, o, gt_ent=None, gt_rel=None, **kwargs):
         # the 'spo' combination is only used in reciprocal model
         # 'spo' prefix stands for triple-wise scoring, suffix "s"/"o" indicates direction
         if combine == 'spoo' or combine == 'sp_' or combine == 'spo':

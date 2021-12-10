@@ -72,7 +72,7 @@ class ConvEScorer(RelationalScorer):
         )
         self.non_linear = torch.nn.ReLU()
 
-    def score_emb(self, s_emb, p_emb, o_emb, combine: str):
+    def score_emb(self, s_emb, p_emb, o_emb, combine: str, **kwargs):
         if combine not in ["sp_", "spo"]:
             raise Exception(
                 "Combine {} not supported in ConvE's score function".format(combine)

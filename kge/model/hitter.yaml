@@ -13,6 +13,19 @@ hitter:
     type: lookup_embedder
     +++: +++
 
+  # Neighborhood size.
+  # During training, random permutation of the full neighborhood.
+  # Otherwise, first neighborhood size of full neighborhood
+  # if neighborhood is less than neighborhood size, left empty and masked.
+  neighborhood_size: 12
+  # Fraction of neighborhood that is randomly dropped (masked)
+  # fraction on batch level, not on per entry level
+  drop_neighborhood_fraction: 0.3
+
+  # context algorithm. Available: hitter, hitter_reciprocalfixed
+  # Hitter does not mask out the reciprocal ground truth if s = o.
+  context_implementation: hitter
+
   implementation: pytorch
   layer_norm_implementation: pytorch
   # dropout for target embeddings before dot multiplication

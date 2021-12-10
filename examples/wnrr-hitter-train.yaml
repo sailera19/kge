@@ -1,14 +1,13 @@
 job.type: train
 dataset.name: wnrr
 
-model: reciprocal_relations_context_model
-reciprocal_relations_context_model:
-  neighborhood_size: 12
-  drop_neighborhood_fraction: 0.5
-  context_implementation: hitter
+model: reciprocal_relations_model
+reciprocal_relations_model:
   base_model:
     type: hitter # redundant since also default
-    neighborhood_size: 0
+    neighborhood_size: 12
+    drop_neighborhood_fraction: 0.5
+    context_implementation: hitter
     output_dropout: 0.6
     implementation: pytorch
     layer_norm_implementation: BERT

@@ -149,7 +149,7 @@ class RelationalScorer(KgeBase):
         return self.score_emb(s_emb, p_emb, o_emb, "spo")
 
     def score_emb(
-        self, s_emb: Tensor, p_emb: Tensor, o_emb: Tensor, combine: str
+        self, s_emb: Tensor, p_emb: Tensor, o_emb: Tensor, combine: str, **kwargs
     ) -> Tensor:
         r"""Scores a set of triples specified by their embeddings.
 
@@ -679,12 +679,12 @@ class KgeModel(KgeBase):
         score of triple :math:`(s_i, p_i, o_i)`.
 
         """
-        s = self.get_s_embedder().embed(s)
-        p = self.get_p_embedder().embed(p)
-        o = self.get_o_embedder().embed(o)
-        return self._scorer.score_emb(s, p, o, combine="spo").view(-1)
+        s_emb = self.get_s_embedder().embed(s)
+        p_emb = self.get_p_embedder().embed(p)
+        o_emb = self.get_o_embedder().embed(o)
+        return self._scorer.score_emb(s_emb, p_emb, o_emb, combine="spo", ground_truth_s=s, ground_truth_p=p, ground_truth_o=o).view(-1)
 
-    def score_sp(self, s: Tensor, p: Tensor, o: Tensor = None, **kwargs) -> Tensor:
+    def score_sp(self, s: Tensor, p: Tensor, o: Tensor = None, ground_truth: Tensor = None, **kwargs) -> Tensor:
         r"""Compute scores for triples formed from a set of sp-pairs and all (or a subset of the) objects.
 
         `s` and `p` are vectors of common size :math:`n`, holding the indexes of the
@@ -697,16 +697,16 @@ class KgeModel(KgeBase):
         If `o` is not None, it is a vector holding the indexes of the objects to score.
 
         """
-        s = self.get_s_embedder().embed(s)
-        p = self.get_p_embedder().embed(p)
+        s_emb = self.get_s_embedder().embed(s)
+        p_emb = self.get_p_embedder().embed(p)
         if o is None:
-            o = self.get_o_embedder().embed_all()
+            o_emb = self.get_o_embedder().embed_all()
         else:
-            o = self.get_o_embedder().embed(o)
+            o_emb = self.get_o_embedder().embed(o)
 
-        return self._scorer.score_emb(s, p, o, combine="sp_")
+        return self._scorer.score_emb(s_emb, p_emb, o_emb, combine="sp_", ground_truth_s=s, ground_truth_p=p, ground_truth_o=ground_truth)
 
-    def score_po(self, p: Tensor, o: Tensor, s: Tensor = None, **kwargs) -> Tensor:
+    def score_po(self, p: Tensor, o: Tensor, s: Tensor = None, ground_truth: Tensor = None, **kwargs) -> Tensor:
         r"""Compute scores for triples formed from a set of po-pairs and (or a subset of the) subjects.
 
         `p` and `o` are vectors of common size :math:`n`, holding the indexes of the
@@ -721,13 +721,13 @@ class KgeModel(KgeBase):
         """
 
         if s is None:
-            s = self.get_s_embedder().embed_all()
+            s_emb = self.get_s_embedder().embed_all()
         else:
-            s = self.get_s_embedder().embed(s)
-        o = self.get_o_embedder().embed(o)
-        p = self.get_p_embedder().embed(p)
+            s_emb = self.get_s_embedder().embed(s)
+        o_emb = self.get_o_embedder().embed(o)
+        p_emb = self.get_p_embedder().embed(p)
 
-        return self._scorer.score_emb(s, p, o, combine="_po")
+        return self._scorer.score_emb(s_emb, p_emb, o_emb, combine="_po", ground_truth_s=ground_truth, ground_truth_p=p, ground_truth_o=o)
 
     def score_so(self, s: Tensor, o: Tensor, p: Tensor = None, **kwargs) -> Tensor:
         r"""Compute scores for triples formed from a set of so-pairs and all (or a subset of the) relations.

@@ -69,7 +69,7 @@ class TransformerScorer(RelationalScorer):
                 self.initialize(layer.self_attn.k_proj_weight)
                 self.initialize(layer.self_attn.v_proj_weight)
 
-    def score_emb(self, s_emb, p_emb, o_emb, combine: str):
+    def score_emb(self, s_emb, p_emb, o_emb, combine: str, **kwargs):
         if combine not in ["sp_", "spo"]:
             raise ValueError(
                 "Combine {} not supported in Transformer's score function".format(
