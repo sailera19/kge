@@ -1,7 +1,7 @@
 # wnrr-conve-1vsAll-kl
 job.type: search
 search.type: ax
-dataset.name: wnrr
+dataset.name: fb15k-237
 
 # training settings (fixed)
 train:
@@ -136,7 +136,7 @@ ax_search:
     # model-specific entries
     - name: reciprocal_relations_model.base_model.neighborhood_size
       type: fixed # keep fixed with HittER argumentation?
-      value: 12 # 50 for fb15k-237; argumentation of HittER: at least 85% of examples have access to entire local neighborhood
+      value: 50 # 50 for fb15k-237; argumentation of HittER: at least 85% of examples have access to entire local neighborhood
 
     - name: reciprocal_relations_model.base_model.implementation
       type: fixed
