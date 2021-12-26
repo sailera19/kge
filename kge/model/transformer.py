@@ -38,6 +38,11 @@ class TransformerScorer(RelationalScorer):
         self.rel_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.rel_type_emb)
 
+        self.feedforward_dim = self.get_option("encoder.dim_feedforward")
+        if not self.feedforward_dim:
+            # set ff dim to 4 times of embeddings dim, as in Vaswani 2017 and Devlin 2019
+            self.feedforward_dim = self.emb_dim * 4
+
         dropout = self.get_option("encoder.dropout")
         if dropout < 0.0:
             if config.get("train.auto_correct"):
@@ -50,7 +55,7 @@ class TransformerScorer(RelationalScorer):
         encoder_layer = torch.nn.TransformerEncoderLayer(
             d_model=self.emb_dim,
             nhead=self.get_option("encoder.nhead"),
-            dim_feedforward=self.get_option("encoder.dim_feedforward"),
+            dim_feedforward=self.feedforward_dim,
             dropout=dropout,
             activation=self.get_option("encoder.activation"),
         )
