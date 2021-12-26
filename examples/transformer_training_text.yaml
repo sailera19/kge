@@ -1,0 +1,41 @@
+job.type: train
+dataset.name: wnrr
+
+import: [transformer]
+model: reciprocal_relations_model
+reciprocal_relations_model.base_model.type: transformer
+
+train:
+  optimizer: Adam
+  optimizer_args:
+    lr: 0.001
+  batch_size: 512
+  max_epochs: 500
+  loss: kl
+  type: 1vsAll
+  lr_scheduler: ReduceLROnPlateau
+  lr_scheduler_args:
+    mode: max
+    patience: 2
+    factor: 0.5
+  lr_warmup: 50
+
+transformer:
+  entity_embedder:
+    initialize: xavier_normal_
+    dim: 80
+    dropout: 0.6
+  relation_embedder:
+    initialize: xavier_normal_
+    dim: 80
+    dropout: 0.6
+  text_embedder:
+    initialize: xavier_normal_
+    dim: 80
+    dropout: 0.6
+
+valid:
+  early_stopping:
+    patience: 5
+  every: 5
+  metric: mean_reciprocal_rank_filtered_with_test

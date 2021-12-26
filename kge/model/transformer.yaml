@@ -12,6 +12,9 @@ transformer:
   relation_embedder:
     type: lookup_embedder
     +++: +++
+  text_embedder:
+    type: lookup_embedder
+    +++: +++
   encoder:
     # see torch.nn.TransformerEncodeLayer
     nhead: 8                     # the number of heads

@@ -4,7 +4,7 @@ from torch import Tensor
 import math
 
 from kge import Config, Dataset
-from kge.model.kge_model import RelationalScorer, KgeModel
+from kge.model.kge_model import RelationalScorer, KgeModel, KgeEmbedder
 
 
 class TransformerScorer(RelationalScorer):
@@ -37,6 +37,10 @@ class TransformerScorer(RelationalScorer):
         self.initialize(self.sub_type_emb)
         self.rel_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.rel_type_emb)
+
+        # the type embeddings
+        self.sub_text_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.sub_text_type_emb)
 
         self.feedforward_dim = self.get_option("encoder.dim_feedforward")
         if not self.feedforward_dim:
@@ -74,7 +78,15 @@ class TransformerScorer(RelationalScorer):
                 self.initialize(layer.self_attn.k_proj_weight)
                 self.initialize(layer.self_attn.v_proj_weight)
 
-    def score_emb(self, s_emb, p_emb, o_emb, combine: str, **kwargs):
+        _, _, num_tokens = dataset.index("entity_ids_to_tokens")
+
+        self._text_embedder = KgeEmbedder.create(
+                config,
+                dataset,
+                self.configuration_key + ".text_embedder",
+                num_tokens)
+
+    def score_emb(self, s_emb, p_emb, o_emb, combine: str, ground_truth_s: Tensor, ground_truth_p: Tensor, ground_truth_o: Tensor, **kwargs):
         if combine not in ["sp_", "spo"]:
             raise ValueError(
                 "Combine {} not supported in Transformer's score function".format(
@@ -82,17 +94,28 @@ class TransformerScorer(RelationalScorer):
                 )
             )
 
+        tokens, attention_mask, _ = self.dataset.index("entity_ids_to_tokens")
+
+        s_text_embeddings = self._text_embedder.embed(tokens[ground_truth_s.long()].to(ground_truth_s.device))
+
         # transform the sp pairs
         batch_size = len(s_emb)
         out = self.encoder.forward(
-            torch.stack(
+            torch.cat(
                 (
-                    self.cls_emb.repeat((batch_size, 1)),
-                    s_emb + self.sub_type_emb.unsqueeze(0),
-                    p_emb + self.rel_type_emb.unsqueeze(0),
+                    self.cls_emb.repeat((1, batch_size, 1)),
+                    (s_emb + self.sub_type_emb.unsqueeze(0)).unsqueeze(0),
+                    (p_emb + self.rel_type_emb.unsqueeze(0)).unsqueeze(0),
+                    (s_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0)
                 ),
                 dim=0,
-            )
+            ),
+            src_key_padding_mask=~torch.cat(
+                (
+                    torch.ones(batch_size, 3, dtype=torch.bool, device=ground_truth_s.device),
+                    attention_mask[ground_truth_s.long()].to(ground_truth_s.device)
+                ),
+                dim=1)
         )  # SxNxE = 3 x batch_size x emb_size
 
         # pick the transformed CLS embeddings
