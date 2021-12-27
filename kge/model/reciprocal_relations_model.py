@@ -104,14 +104,16 @@ class ReciprocalRelationsModel(KgeModel):
                                                combine="sp_",
                                                ground_truth_s=s,
                                                ground_truth_p=p,
-                                               ground_truth_o=o)
+                                               ground_truth_o=o,
+                                               targets_o=entity_subset)
             po_scores = self._scorer.score_emb(o_emb,
                                                p_inv_emb,
                                                all_entities,
                                                combine="sp_",
                                                ground_truth_s=o,
                                                ground_truth_p=p + self.dataset.num_relations(),
-                                               ground_truth_o=s)
+                                               ground_truth_o=s,
+                                               targets_o=entity_subset)
         else:
             if entity_subset is not None:
                 all_objects = self.get_o_embedder().embed(entity_subset)
