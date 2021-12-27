@@ -35,3 +35,6 @@ transformer:
   tokenization:
     trainer:
       +++: +++
+
+  s_dropout: 0.3
+  o_dropout: 0.3

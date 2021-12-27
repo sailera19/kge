@@ -8,7 +8,7 @@ reciprocal_relations_model.base_model:
 
   tokenization:
     trainer:
-      vocab_size: 5000
+      min_frequency: 3
 
 train:
   optimizer: Adam

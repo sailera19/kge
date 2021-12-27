@@ -54,6 +54,14 @@ class TransformerScorer(RelationalScorer):
         self.o_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.o_type_emb)
 
+        # masks
+        self.s_mask = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.s_mask)
+        self.o_mask = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.o_mask)
+
+        self.s_dropout = self.get_option("s_dropout")
+        self.o_dropout = self.get_option("o_dropout")
 
         self.feedforward_dim = self.get_option("encoder.dim_feedforward")
         if not self.feedforward_dim:
@@ -143,6 +151,10 @@ class TransformerScorer(RelationalScorer):
 
         s_text_embeddings = self._text_embedder.embed(tokens[ground_truth_s.long()].to(ground_truth_s.device))
 
+        if self.training:
+            s_masked = torch.zeros(len(s_emb), dtype=torch.bool).bernoulli_(self.s_dropout)
+            s_emb[s_masked] = self.s_mask
+
         # transform the sp pairs
         batch_size = len(s_emb)
         out = self.encoder.forward(
@@ -180,18 +192,23 @@ class TransformerScorer(RelationalScorer):
                 num_o_embeddings = len(targets_o)
                 o_attention_mask = attention_mask[targets_o.long()].to(targets_o.device)
 
+        if self.training:
+            o_masked = torch.zeros(len(o_emb), dtype=torch.bool).bernoulli_(self.o_dropout)
+            o_emb[o_masked] = self.o_mask
+
         o_emb = self.encoder.forward(
             torch.cat(
                 (
                     self.o_cls_emb.repeat((1, num_o_embeddings, 1)),
                     (o_emb + self.o_type_emb.unsqueeze(0)).unsqueeze(0),
-                    (o_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0)
+                    (self.any_rel_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_type_emb),
+                    (o_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0),
                 ),
                 dim=0,
             ),
             src_key_padding_mask=~torch.cat(
                 (
-                    torch.ones(num_o_embeddings, 2, dtype=torch.bool, device=ground_truth_o.device),
+                    torch.ones(num_o_embeddings, 3, dtype=torch.bool, device=ground_truth_o.device),
                     o_attention_mask
                 ),
                 dim=1)
