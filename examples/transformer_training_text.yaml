@@ -12,13 +12,20 @@ train:
   batch_size: 512
   max_epochs: 500
   loss: kl
-  type: 1vsAll
+  type: negative_sampling
   lr_scheduler: ReduceLROnPlateau
   lr_scheduler_args:
     mode: max
     patience: 2
     factor: 0.5
   lr_warmup: 50
+
+negative_sampling:
+  shared: True
+  with_replacement: False
+  implementation: batch
+  num_samples:
+    s: 512
 
 transformer:
   entity_embedder:

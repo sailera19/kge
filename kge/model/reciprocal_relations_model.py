@@ -76,7 +76,7 @@ class ReciprocalRelationsModel(KgeModel):
             s_emb = self.get_s_embedder().embed(s)
         p_emb = self.get_p_embedder().embed(p + self.dataset.num_relations())
         o_emb = self.get_o_embedder().embed(o)
-        return self._scorer.score_emb(o_emb, p_emb, s_emb, combine="sp_", ground_truth_s=o, ground_truth_p=p + self.dataset.num_relations(), ground_truth_o=ground_truth)
+        return self._scorer.score_emb(o_emb, p_emb, s_emb, combine="sp_", ground_truth_s=o, ground_truth_p=p + self.dataset.num_relations(), ground_truth_o=ground_truth, targets_o=s)
 
     def score_so(self, s, o, p=None, **kwargs):
         raise Exception("The reciprocal relations model cannot score relations.")

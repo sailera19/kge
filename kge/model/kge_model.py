@@ -704,7 +704,7 @@ class KgeModel(KgeBase):
         else:
             o_emb = self.get_o_embedder().embed(o)
 
-        return self._scorer.score_emb(s_emb, p_emb, o_emb, combine="sp_", ground_truth_s=s, ground_truth_p=p, ground_truth_o=ground_truth)
+        return self._scorer.score_emb(s_emb, p_emb, o_emb, combine="sp_", ground_truth_s=s, ground_truth_p=p, ground_truth_o=ground_truth, targets_o=o)
 
     def score_po(self, p: Tensor, o: Tensor, s: Tensor = None, ground_truth: Tensor = None, **kwargs) -> Tensor:
         r"""Compute scores for triples formed from a set of po-pairs and (or a subset of the) subjects.

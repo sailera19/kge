@@ -38,9 +38,13 @@ class TransformerScorer(RelationalScorer):
         self.rel_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.rel_type_emb)
 
-        # the type embeddings
+        # text embeddings
         self.sub_text_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.sub_text_type_emb)
+        self.obj_text_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.obj_text_type_emb)
+        self.any_rel_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.any_rel_type_emb)
 
         self.feedforward_dim = self.get_option("encoder.dim_feedforward")
         if not self.feedforward_dim:
@@ -86,7 +90,7 @@ class TransformerScorer(RelationalScorer):
                 self.configuration_key + ".text_embedder",
                 num_tokens)
 
-    def score_emb(self, s_emb, p_emb, o_emb, combine: str, ground_truth_s: Tensor, ground_truth_p: Tensor, ground_truth_o: Tensor, **kwargs):
+    def score_emb(self, s_emb, p_emb, o_emb, combine: str, ground_truth_s: Tensor, ground_truth_p: Tensor, ground_truth_o: Tensor, targets_o: Tensor=None, **kwargs):
         if combine not in ["sp_", "spo"]:
             raise ValueError(
                 "Combine {} not supported in Transformer's score function".format(
@@ -120,6 +124,38 @@ class TransformerScorer(RelationalScorer):
 
         # pick the transformed CLS embeddings
         out = out[0, ::]
+
+        if combine == "spo":
+            o_text_embeddings = self._text_embedder.embed(tokens[ground_truth_o.long()].to(ground_truth_o.device))
+            num_o_embeddings = batch_size
+            o_attention_mask = attention_mask[ground_truth_o.long()].to(ground_truth_o.device)
+        else:
+            if targets_o is None:
+                o_text_embeddings = self._text_embedder.embed(tokens.to(ground_truth_o.device))
+                num_o_embeddings = len(tokens)
+                o_attention_mask = attention_mask.to(ground_truth_o.device)
+            else:
+                o_text_embeddings = self._text_embedder.embed(tokens[targets_o.long()].to(targets_o.device))
+                num_o_embeddings = len(targets_o)
+                o_attention_mask = attention_mask[targets_o.long()].to(targets_o.device)
+
+        o_emb = self.encoder.forward(
+            torch.cat(
+                (
+                    self.cls_emb.repeat((1, num_o_embeddings, 1)),
+                    (o_emb + self.sub_type_emb.unsqueeze(0)).unsqueeze(0),
+                    (self.any_rel_type_emb.repeat((1, num_o_embeddings, 1)) + self.rel_type_emb.unsqueeze(0)),
+                    (o_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0)
+                ),
+                dim=0,
+            ),
+            src_key_padding_mask=~torch.cat(
+                (
+                    torch.ones(num_o_embeddings, 3, dtype=torch.bool, device=ground_truth_o.device),
+                    o_attention_mask
+                ),
+                dim=1)
+        )[0, ::]
 
         # now take dot product
         if combine == "sp_":

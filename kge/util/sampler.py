@@ -346,11 +346,11 @@ class BatchNegativeSample(Configurable):
     @staticmethod
     def _score_unique_targets(model, slot, triples, unique_targets) -> torch.Tensor:
         if slot == S:
-            all_scores = model.score_po(triples[:, P], triples[:, O], unique_targets)
+            all_scores = model.score_po(triples[:, P], triples[:, O], unique_targets, ground_truth=triples[:, S])
         elif slot == P:
-            all_scores = model.score_so(triples[:, S], triples[:, O], unique_targets)
+            all_scores = model.score_so(triples[:, S], triples[:, O], unique_targets, ground_truth=triples[:, P])
         elif slot == O:
-            all_scores = model.score_sp(triples[:, S], triples[:, P], unique_targets)
+            all_scores = model.score_sp(triples[:, S], triples[:, P], unique_targets, ground_truth=triples[:, O])
         else:
             raise NotImplementedError
         return all_scores
