@@ -1,5 +1,9 @@
+import numpy as np
 import torch
 import torch.nn
+from tokenizers import Tokenizer
+from tokenizers.models import BPE
+from tokenizers.pre_tokenizers import CharDelimiterSplit
 from torch import Tensor
 import math
 
@@ -45,6 +49,11 @@ class TransformerScorer(RelationalScorer):
         self.initialize(self.obj_text_type_emb)
         self.any_rel_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.any_rel_type_emb)
+        self.o_cls_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.o_cls_emb)
+        self.o_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.o_type_emb)
+
 
         self.feedforward_dim = self.get_option("encoder.dim_feedforward")
         if not self.feedforward_dim:
@@ -82,6 +91,8 @@ class TransformerScorer(RelationalScorer):
                 self.initialize(layer.self_attn.k_proj_weight)
                 self.initialize(layer.self_attn.v_proj_weight)
 
+        self.generate_token_mapping(dataset, config, self.configuration_key + ".tokenization")
+
         _, _, num_tokens = dataset.index("entity_ids_to_tokens")
 
         self._text_embedder = KgeEmbedder.create(
@@ -89,6 +100,36 @@ class TransformerScorer(RelationalScorer):
                 dataset,
                 self.configuration_key + ".text_embedder",
                 num_tokens)
+
+    def generate_token_mapping(self, dataset, config, configuration_key):
+        name = "entity_ids_to_tokens"
+
+        if not dataset._indexes.get(name):
+            entity_ids_to_strings = np.array(dataset.entity_strings())
+            train_triples = dataset.load_triples("train")
+            strings_in_train = entity_ids_to_strings[torch.cat((train_triples[:, 0], train_triples[:, 2])).unique()]
+            strings_in_train = strings_in_train[~(strings_in_train == None)]
+            tokenizer = Tokenizer(BPE())
+
+            tokenizer.pre_tokenizer = CharDelimiterSplit("_")
+
+            from tokenizers.trainers import BpeTrainer
+
+            trainer = BpeTrainer(special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"], **config.get(configuration_key).get("trainer"))
+
+            tokenizer.train_from_iterator(strings_in_train, trainer=trainer)
+
+            tokenizer.enable_padding()
+
+            output = tokenizer.encode_batch([x if x else "" for x in entity_ids_to_strings])
+
+            entity_ids_to_tokens = torch.tensor([x.ids for x in output], dtype=torch.int64)
+
+            attention_mask = torch.tensor([x.attention_mask for x in output], dtype=torch.bool)
+
+            dataset._indexes[name] = entity_ids_to_tokens, attention_mask, tokenizer.get_vocab_size()
+
+        return dataset._indexes[name]
 
     def score_emb(self, s_emb, p_emb, o_emb, combine: str, ground_truth_s: Tensor, ground_truth_p: Tensor, ground_truth_o: Tensor, targets_o: Tensor=None, **kwargs):
         if combine not in ["sp_", "spo"]:
@@ -142,16 +183,15 @@ class TransformerScorer(RelationalScorer):
         o_emb = self.encoder.forward(
             torch.cat(
                 (
-                    self.cls_emb.repeat((1, num_o_embeddings, 1)),
-                    (o_emb + self.sub_type_emb.unsqueeze(0)).unsqueeze(0),
-                    (self.any_rel_type_emb.repeat((1, num_o_embeddings, 1)) + self.rel_type_emb.unsqueeze(0)),
+                    self.o_cls_emb.repeat((1, num_o_embeddings, 1)),
+                    (o_emb + self.o_type_emb.unsqueeze(0)).unsqueeze(0),
                     (o_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0)
                 ),
                 dim=0,
             ),
             src_key_padding_mask=~torch.cat(
                 (
-                    torch.ones(num_o_embeddings, 3, dtype=torch.bool, device=ground_truth_o.device),
+                    torch.ones(num_o_embeddings, 2, dtype=torch.bool, device=ground_truth_o.device),
                     o_attention_mask
                 ),
                 dim=1)

@@ -395,38 +395,6 @@ def index_neighbor(dataset):
 
     return dataset._indexes.get(name)
 
-def index_entity_ids_to_tokens(dataset):
-    name = "entity_ids_to_tokens"
-
-    if not dataset._indexes.get(name):
-        entity_ids_to_strings = np.array(dataset.entity_strings())
-        train_triples = dataset.load_triples("train")
-        strings_in_train = entity_ids_to_strings[torch.cat((train_triples[:, 0], train_triples[:, 2])).unique()]
-        strings_in_train = strings_in_train[~(strings_in_train == None)]
-        tokenizer = Tokenizer(BPE())
-
-        tokenizer.pre_tokenizer = CharDelimiterSplit("_")
-
-        from tokenizers.trainers import BpeTrainer
-
-        trainer = BpeTrainer(special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"])
-
-        tokenizer.train_from_iterator(strings_in_train, trainer=trainer)
-
-        tokenizer.enable_padding()
-
-        output = tokenizer.encode_batch([x if x else "" for x in entity_ids_to_strings])
-
-        entity_ids_to_tokens = torch.tensor([x.ids for x in output], dtype=torch.int64)
-
-        attention_mask = torch.tensor([x.attention_mask for x in output], dtype=torch.bool)
-
-        dataset._indexes[name] = entity_ids_to_tokens, attention_mask, tokenizer.get_vocab_size()
-
-    dataset.config.log("Tokens index finished", prefix="  ")
-
-    return dataset._indexes[name]
-
 
 
 class IndexWrapper:
@@ -461,7 +429,6 @@ def create_default_index_functions(dataset: "Dataset"):
     dataset.index_functions["relations_per_type"] = index_relations_per_type
     dataset.index_functions["frequency_percentiles"] = index_frequency_percentiles
     dataset.index_functions["neighbor"] = index_neighbor
-    dataset.index_functions["entity_ids_to_tokens"] = index_entity_ids_to_tokens
 
     for obj in ["entity", "relation"]:
         dataset.index_functions[f"{obj}_id_to_index"] = IndexWrapper(

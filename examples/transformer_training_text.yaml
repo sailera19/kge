@@ -3,7 +3,12 @@ dataset.name: wnrr
 
 import: [transformer]
 model: reciprocal_relations_model
-reciprocal_relations_model.base_model.type: transformer
+reciprocal_relations_model.base_model:
+  type: transformer
+
+  tokenization:
+    trainer:
+      vocab_size: 5000
 
 train:
   optimizer: Adam
@@ -46,3 +51,6 @@ valid:
     patience: 5
   every: 5
   metric: mean_reciprocal_rank_filtered_with_test
+
+eval.batch_size: 100000
+entity_ranking.chunk_size: 128
