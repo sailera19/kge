@@ -6,9 +6,21 @@ model: reciprocal_relations_model
 reciprocal_relations_model.base_model:
   type: transformer
 
+
   tokenization:
     trainer:
       min_frequency: 3
+  enable_text: False
+  entity_embedder:
+    type: text_transformer_embedder
+    tokenization:
+      trainer:
+        min_frequency: 3
+    initialize: normal_
+    dim: 80
+    dropout: 0.6
+    encoder:
+      dropout: 0.6
 
 train:
   optimizer: Adam
@@ -30,7 +42,7 @@ negative_sampling:
   with_replacement: False
   implementation: batch
   num_samples:
-    s: 512
+    s: 2048
 
 transformer:
   entity_embedder:
@@ -43,7 +55,7 @@ transformer:
     dropout: 0.6
   text_embedder:
     initialize: xavier_normal_
-    dim: 80
+    dim: 320
     dropout: 0.6
 
 valid:
@@ -52,5 +64,6 @@ valid:
   every: 5
   metric: mean_reciprocal_rank_filtered_with_test
 
+#eval.batch_size: 1024
 eval.batch_size: 100000
 entity_ranking.chunk_size: 128

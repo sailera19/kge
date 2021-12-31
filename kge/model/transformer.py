@@ -33,6 +33,8 @@ class TransformerScorer(RelationalScorer):
         super().__init__(config, dataset, configuration_key)
         self.emb_dim = self.get_option("entity_embedder.dim")
 
+        self.enable_text = self.get_option("enable_text")
+
         # the CLS embedding
         self.cls_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.cls_emb)
@@ -99,15 +101,16 @@ class TransformerScorer(RelationalScorer):
                 self.initialize(layer.self_attn.k_proj_weight)
                 self.initialize(layer.self_attn.v_proj_weight)
 
-        self.generate_token_mapping(dataset, config, self.configuration_key + ".tokenization")
+        if self.enable_text:
+            self.generate_token_mapping(dataset, config, self.configuration_key + ".tokenization")
 
-        _, _, num_tokens = dataset.index("entity_ids_to_tokens")
+            _, _, num_tokens = dataset.index("entity_ids_to_tokens")
 
-        self._text_embedder = KgeEmbedder.create(
-                config,
-                dataset,
-                self.configuration_key + ".text_embedder",
-                num_tokens)
+            self._text_embedder = KgeEmbedder.create(
+                    config,
+                    dataset,
+                    self.configuration_key + ".text_embedder",
+                    num_tokens)
 
     def generate_token_mapping(self, dataset, config, configuration_key):
         name = "entity_ids_to_tokens"
@@ -147,72 +150,86 @@ class TransformerScorer(RelationalScorer):
                 )
             )
 
-        tokens, attention_mask, _ = self.dataset.index("entity_ids_to_tokens")
-
-        s_text_embeddings = self._text_embedder.embed(tokens[ground_truth_s.long()].to(ground_truth_s.device))
-
-        if self.training:
-            s_masked = torch.zeros(len(s_emb), dtype=torch.bool).bernoulli_(self.s_dropout)
-            s_emb[s_masked] = self.s_mask
-
-        # transform the sp pairs
         batch_size = len(s_emb)
-        out = self.encoder.forward(
-            torch.cat(
-                (
-                    self.cls_emb.repeat((1, batch_size, 1)),
-                    (s_emb + self.sub_type_emb.unsqueeze(0)).unsqueeze(0),
-                    (p_emb + self.rel_type_emb.unsqueeze(0)).unsqueeze(0),
-                    (s_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0)
+
+        if self.enable_text:
+            tokens, attention_mask, _ = self.dataset.index("entity_ids_to_tokens")
+
+            s_text_embeddings = self._text_embedder.embed(tokens[ground_truth_s.long()].to(ground_truth_s.device))
+
+            if self.training:
+                s_masked = torch.zeros(len(s_emb), dtype=torch.bool).bernoulli_(self.s_dropout)
+                s_emb[s_masked] = self.s_mask
+
+            # transform the sp pairs
+            out = self.encoder.forward(
+                torch.cat(
+                    (
+                        self.cls_emb.repeat((1, batch_size, 1)),
+                        (s_emb + self.sub_type_emb.unsqueeze(0)).unsqueeze(0),
+                        (p_emb + self.rel_type_emb.unsqueeze(0)).unsqueeze(0),
+                        (s_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0)
+                    ),
+                    dim=0,
                 ),
-                dim=0,
-            ),
-            src_key_padding_mask=~torch.cat(
-                (
-                    torch.ones(batch_size, 3, dtype=torch.bool, device=ground_truth_s.device),
-                    attention_mask[ground_truth_s.long()].to(ground_truth_s.device)
-                ),
-                dim=1)
-        )  # SxNxE = 3 x batch_size x emb_size
+                src_key_padding_mask=~torch.cat(
+                    (
+                        torch.ones(batch_size, 3, dtype=torch.bool, device=ground_truth_s.device),
+                        attention_mask[ground_truth_s.long()].to(ground_truth_s.device)
+                    ),
+                    dim=1)
+            )  # SxNxE = 3 x batch_size x emb_size
+        else:
+            out = self.encoder.forward(
+                torch.stack(
+                    (
+                        self.cls_emb.repeat((batch_size, 1)),
+                        s_emb + self.sub_type_emb.unsqueeze(0),
+                        p_emb + self.rel_type_emb.unsqueeze(0),
+                    ),
+                    dim=0,
+                )
+            )  # SxNxE = 3 x batch_size x emb_size
 
         # pick the transformed CLS embeddings
         out = out[0, ::]
 
-        if combine == "spo":
-            o_text_embeddings = self._text_embedder.embed(tokens[ground_truth_o.long()].to(ground_truth_o.device))
-            num_o_embeddings = batch_size
-            o_attention_mask = attention_mask[ground_truth_o.long()].to(ground_truth_o.device)
-        else:
-            if targets_o is None:
-                o_text_embeddings = self._text_embedder.embed(tokens.to(ground_truth_o.device))
-                num_o_embeddings = len(tokens)
-                o_attention_mask = attention_mask.to(ground_truth_o.device)
+        if self.enable_text:
+            if combine == "spo":
+                o_text_embeddings = self._text_embedder.embed(tokens[ground_truth_o.long()].to(ground_truth_o.device))
+                num_o_embeddings = batch_size
+                o_attention_mask = attention_mask[ground_truth_o.long()].to(ground_truth_o.device)
             else:
-                o_text_embeddings = self._text_embedder.embed(tokens[targets_o.long()].to(targets_o.device))
-                num_o_embeddings = len(targets_o)
-                o_attention_mask = attention_mask[targets_o.long()].to(targets_o.device)
+                if targets_o is None:
+                    o_text_embeddings = self._text_embedder.embed(tokens.to(ground_truth_o.device))
+                    num_o_embeddings = len(tokens)
+                    o_attention_mask = attention_mask.to(ground_truth_o.device)
+                else:
+                    o_text_embeddings = self._text_embedder.embed(tokens[targets_o.long()].to(targets_o.device))
+                    num_o_embeddings = len(targets_o)
+                    o_attention_mask = attention_mask[targets_o.long()].to(targets_o.device)
 
-        if self.training:
-            o_masked = torch.zeros(len(o_emb), dtype=torch.bool).bernoulli_(self.o_dropout)
-            o_emb[o_masked] = self.o_mask
+            if self.training:
+                o_masked = torch.zeros(len(o_emb), dtype=torch.bool).bernoulli_(self.o_dropout)
+                o_emb[o_masked] = self.o_mask
 
-        o_emb = self.encoder.forward(
-            torch.cat(
-                (
-                    self.o_cls_emb.repeat((1, num_o_embeddings, 1)),
-                    (o_emb + self.o_type_emb.unsqueeze(0)).unsqueeze(0),
-                    (self.any_rel_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_type_emb),
-                    (o_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0),
+            o_emb = self.encoder.forward(
+                torch.cat(
+                    (
+                        self.o_cls_emb.repeat((1, num_o_embeddings, 1)),
+                        (o_emb + self.o_type_emb.unsqueeze(0)).unsqueeze(0),
+                        (self.any_rel_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_type_emb),
+                        (o_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0),
+                    ),
+                    dim=0,
                 ),
-                dim=0,
-            ),
-            src_key_padding_mask=~torch.cat(
-                (
-                    torch.ones(num_o_embeddings, 3, dtype=torch.bool, device=ground_truth_o.device),
-                    o_attention_mask
-                ),
-                dim=1)
-        )[0, ::]
+                src_key_padding_mask=~torch.cat(
+                    (
+                        torch.ones(num_o_embeddings, 3, dtype=torch.bool, device=ground_truth_o.device),
+                        o_attention_mask
+                    ),
+                    dim=1)
+            )[0, ::]
 
         # now take dot product
         if combine == "sp_":
