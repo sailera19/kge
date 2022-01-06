@@ -555,6 +555,9 @@ class DefaultSharedNegativeSample(BatchNegativeSample):
         # compute scores for all unique targets for slot
         self.forward_time -= time.time()
         all_scores = self._score_unique_targets(model, slot, triples, unique_targets)
+        self_pred_loss = 0
+        if isinstance(all_scores, tuple):
+            all_scores, self_pred_loss = all_scores
 
         # create the complete scoring matrix
         device = self.positive_triples.device
@@ -575,7 +578,10 @@ class DefaultSharedNegativeSample(BatchNegativeSample):
             ]
         self.forward_time += time.time()
 
-        return scores
+        if self_pred_loss > 0:
+            return scores, self_pred_loss
+        else:
+            return scores
 
     def to(self, device):
         super().to(device)

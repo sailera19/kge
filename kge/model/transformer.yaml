@@ -39,3 +39,5 @@ transformer:
 
   s_dropout: 0.3
   o_dropout: 0.3
+  s_text_dropout: 0.15
+  o_text_dropout: 0.15

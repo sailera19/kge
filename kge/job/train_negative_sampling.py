@@ -136,16 +136,27 @@ class TrainingJobNegativeSampling(TrainingJob):
                 labels[slot][:, 0] = 1
                 result.prepare_time += time.time()
 
+            self_pred_loss = 0
+
             # compute the scores
             result.forward_time -= time.time()
             scores = torch.empty((subbatch_size, num_samples + 1), device=self.device)
-            scores[:, 0] = self.model.score_spo(
+            negative_sampling_scores = self.model.score_spo(
                 triples[:, S], triples[:, P], triples[:, O], direction=SLOT_STR[slot],
             )
+            if isinstance(negative_sampling_scores, tuple):
+                negative_sampling_scores, self_pred_loss_temp = negative_sampling_scores
+                self_pred_loss += self_pred_loss_temp
+            scores[:, 0] = negative_sampling_scores
             result.forward_time += time.time()
-            scores[:, 1:] = batch_negative_samples[slot].score(
+            negative_sampling_scores = batch_negative_samples[slot].score(
                 self.model, indexes=subbatch_slice
             )
+            if isinstance(negative_sampling_scores, tuple):
+                negative_sampling_scores, self_pred_loss_temp = negative_sampling_scores
+                self_pred_loss += self_pred_loss_temp
+                result.avg_loss_self += self_pred_loss.item()
+            scores[:, 1:] = negative_sampling_scores
             result.forward_time += batch_negative_samples[slot].forward_time
             result.prepare_time += batch_negative_samples[slot].prepare_time
 
@@ -153,7 +164,7 @@ class TrainingJobNegativeSampling(TrainingJob):
             result.forward_time -= time.time()
             loss_value_torch = (
                 self.loss(scores, labels[slot], num_negatives=num_samples) / batch_size
-            )
+            ) + self_pred_loss
             result.avg_loss += loss_value_torch.item()
             result.forward_time += time.time()
 

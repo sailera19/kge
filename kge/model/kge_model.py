@@ -682,7 +682,12 @@ class KgeModel(KgeBase):
         s_emb = self.get_s_embedder().embed(s)
         p_emb = self.get_p_embedder().embed(p)
         o_emb = self.get_o_embedder().embed(o)
-        return self._scorer.score_emb(s_emb, p_emb, o_emb, combine="spo", ground_truth_s=s, ground_truth_p=p, ground_truth_o=o).view(-1)
+        scores = self._scorer.score_emb(s_emb, p_emb, o_emb, combine="spo", ground_truth_s=s, ground_truth_p=p, ground_truth_o=o)
+        if isinstance(scores, tuple):
+            scores, self_pred_loss = scores
+            return scores.view(-1), self_pred_loss
+        else:
+            return scores.view(-1)
 
     def score_sp(self, s: Tensor, p: Tensor, o: Tensor = None, ground_truth: Tensor = None, **kwargs) -> Tensor:
         r"""Compute scores for triples formed from a set of sp-pairs and all (or a subset of the) objects.

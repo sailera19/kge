@@ -46,9 +46,14 @@ class TextTransformerEmbedder(KgeEmbedder):
             self.vocab_size, self.dim, sparse=self.sparse,
         )
 
+        self._entity_embeddings = torch.nn.Embedding(
+            self.entity_vocab_size, self.dim, sparse=self.sparse,
+        )
+
         if not init_for_load_only:
             # initialize weights
             self.initialize(self._embeddings.weight.data)
+            self.initialize(self._entity_embeddings.weight.data)
             self._normalize_embeddings()
 
         # TODO handling negative dropout because using it with ax searches for now
@@ -64,6 +69,23 @@ class TextTransformerEmbedder(KgeEmbedder):
 
         self.cls_emb = torch.nn.parameter.Parameter(torch.zeros(self.dim))
         self.initialize(self.cls_emb)
+        self.combine_cls_emb = torch.nn.parameter.Parameter(torch.zeros(self.dim))
+        self.initialize(self.combine_cls_emb)
+
+        self.mlm_mask_emb = torch.nn.parameter.Parameter(torch.zeros(self.dim))
+        self.initialize(self.mlm_mask_emb)
+
+        self.entity_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.dim))
+        self.initialize(self.entity_type_emb)
+        self.text_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.dim))
+        self.initialize(self.text_type_emb)
+
+        self.combine_entity_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.dim))
+        self.initialize(self.combine_entity_type_emb)
+        self.combine_text_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.dim))
+        self.initialize(self.combine_text_type_emb)
+
+        self.layer_norm = torch.nn.LayerNorm(self.dim)
 
         self.feedforward_dim = self.get_option("encoder.dim_feedforward")
         if not self.feedforward_dim:
@@ -77,10 +99,13 @@ class TextTransformerEmbedder(KgeEmbedder):
             dropout=dropout,
             activation=self.get_option("encoder.activation"),
         )
-        self.encoder = torch.nn.TransformerEncoder(
+        self.text_encoder = torch.nn.TransformerEncoder(
             encoder_layer, num_layers=self.get_option("encoder.num_layers")
         )
-        for layer in self.encoder.layers:
+        self.combine_encoder = torch.nn.TransformerEncoder(
+            encoder_layer, num_layers=self.get_option("encoder.num_layers")
+        )
+        for layer in [*self.text_encoder.layers, *self.combine_encoder.layers]:
             self.initialize(layer.linear1.weight.data)
             self.initialize(layer.linear2.weight.data)
             self.initialize(layer.self_attn.out_proj.weight.data)
@@ -98,6 +123,93 @@ class TextTransformerEmbedder(KgeEmbedder):
                 self._embeddings.weight.data = torch.nn.functional.normalize(
                     self._embeddings.weight.data, p=self.normalize_p, dim=-1
                 )
+                self._entity_embeddings.weight.data = torch.nn.functional.normalize(
+                    self._entity_embeddings.weight.data, p=self.normalize_p, dim=-1
+                )
+
+    def _pretrain_text(self, job):
+        from kge.job import TrainingJob
+        if not isinstance(job, TrainingJob):
+            return
+        num_epochs = 500
+        planned_batch_size = 2048
+
+        device = self._embeddings.weight.data.device
+        optimizer = torch.optim.Adagrad(self.parameters(), lr=0.001)
+        warmup = 50
+        lr_function = lambda epoch: (epoch + 1) / warmup if epoch < warmup else (num_epochs - (epoch + 1)) / (num_epochs - warmup)
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_function)
+        dropout = 0.15
+        dataloader = torch.utils.data.DataLoader(self.pretrain_text_entities.to(device), batch_size=planned_batch_size, shuffle=True)
+        num_batches = len(dataloader)
+        for epoch in range(num_epochs):
+            avg_loss = 0
+            for batch_number, indexes in enumerate(dataloader):
+                batch_size = len(indexes)
+                tokens, attention_mask, _ = self.dataset.index("entity_ids_to_tokens")
+                attention_mask = attention_mask[indexes.long()].to(device)
+                tokens = tokens[indexes.long()].to(device)
+                text_embeddings = self._embeddings(tokens)
+                entity_embeddings = self._entity_embeddings(indexes.long())
+                mlm_mask = torch.empty(attention_mask.shape, dtype=torch.bool, device=device).bernoulli_(dropout)
+                mlm_mask = attention_mask & mlm_mask
+                text_embeddings[mlm_mask] = self.mlm_mask_emb
+                out = self.text_encoder.forward(
+                    self.layer_norm(torch.cat(
+                        (
+                            self.cls_emb.repeat((1, batch_size, 1)),
+                            #entity_embeddings.unsqueeze(0) + self.entity_type_emb,
+                            text_embeddings.transpose(1, 0) + self.text_type_emb,
+                        ),
+                        dim=0,
+                    )),
+                    src_key_padding_mask=~torch.cat(
+                        (
+                            torch.ones(batch_size, 1, dtype=torch.bool, device=text_embeddings.device),
+                            attention_mask
+                        ),
+                        dim=1)
+                    )[1:][mlm_mask.transpose(1, 0)]
+                loss = torch.nn.functional.cross_entropy(torch.mm(out, self._embeddings.weight.data.transpose(1, 0)), tokens[mlm_mask])
+                avg_loss += loss.item()
+                loss.backward()
+                optimizer.step()
+                optimizer.zero_grad()
+                # print console feedback
+                job.config.print(
+                    (
+                        "\r"  # go back
+                        + "{} epoch {:2d} batch {:2d}/{}"
+                        + ", avg_loss {:.4E}"
+                        + "\033[K"  # clear to right
+                    ).format(
+                        job.config.log_prefix,
+                        epoch,
+                        batch_number,
+                        num_batches,
+                        loss,
+                        ),
+                    end="",
+                    flush=True,
+                )
+            avg_loss = avg_loss / num_batches
+            job.config.print(
+                (
+                        "\r{} epoch {:2d}"
+                        + ", avg_loss {:.4E}"
+                        + ",lr: {:.6f}"
+                        + "\033[K"  # clear to right
+                ).format(
+                    job.config.log_prefix,
+                    epoch,
+                    avg_loss,
+                    optimizer.param_groups[0]["lr"]
+                ),
+                flush=True,
+            )
+            scheduler.step()
+
+
 
     def prepare_job(self, job: Job, **kwargs):
         from kge.job import TrainingJob
@@ -109,6 +221,9 @@ class TextTransformerEmbedder(KgeEmbedder):
 
             # normalize after each batch
             job.post_batch_hooks.append(lambda job: self._normalize_embeddings())
+        job.pre_run_hooks.append(self._pretrain_text)
+
+
 
     @torch.no_grad()
     def init_pretrained(self, pretrained_embedder: KgeEmbedder) -> None:
@@ -131,24 +246,43 @@ class TextTransformerEmbedder(KgeEmbedder):
 
         text_embeddings = self._embeddings(tokens[indexes.long()].to(indexes.device))
 
+        entity_embeddings = self._entity_embeddings(indexes.long())
+
+        if self.dropout.p > 0:
+            text_embeddings = self.dropout(text_embeddings)
+
+        if self.dropout.p > 0:
+            entity_embeddings = self.dropout(entity_embeddings)
+
         # transform the sp pairs
-        text_embeddings = self.encoder.forward(
-            torch.cat(
+        text_embeddings = self.text_encoder.forward(
+            self.layer_norm(torch.cat(
                 (
                     self.cls_emb.repeat((1, batch_size, 1)),
-                    text_embeddings.transpose(1, 0)
+                    entity_embeddings.unsqueeze(0) + self.entity_type_emb,
+                    text_embeddings.transpose(1, 0) + self.text_type_emb,
                 ),
                 dim=0,
-            ),
+            )),
             src_key_padding_mask=~torch.cat(
                 (
-                    torch.ones(batch_size, 1, dtype=torch.bool, device=text_embeddings.device),
+                    torch.ones(batch_size, 2, dtype=torch.bool, device=text_embeddings.device),
                     attention_mask[indexes.long()].to(text_embeddings.device)
                 ),
                 dim=1)
         )[0, :]
 
-        return self._postprocess(text_embeddings)
+        #text_embeddings = self.combine_encoder.forward(
+        #    torch.cat(
+        #        (
+        #            self.combine_cls_emb.repeat((1, batch_size, 1)),
+        #            entity_embeddings.unsqueeze(0) + self.combine_entity_type_emb,
+        #            text_embeddings.unsqueeze(0) + self.combine_text_type_emb,
+        #        )
+        #    )
+        #)[0, :]
+
+        return text_embeddings
 
     def embed_all(self) -> Tensor:
         return self.embed(torch.arange(
@@ -217,8 +351,13 @@ class TextTransformerEmbedder(KgeEmbedder):
         if not dataset._indexes.get(name):
             entity_ids_to_strings = np.array(dataset.entity_strings())
             train_triples = dataset.load_triples("train")
-            strings_in_train = entity_ids_to_strings[torch.cat((train_triples[:, 0], train_triples[:, 2])).unique()]
+            train_entities = torch.cat((train_triples[:, 0], train_triples[:, 2])).unique()
+            strings_in_train = entity_ids_to_strings[train_entities]
+            train_entities = train_entities[~(strings_in_train == None)]
             strings_in_train = strings_in_train[~(strings_in_train == None)]
+
+            self.pretrain_text_entities = train_entities
+
             tokenizer = Tokenizer(BPE())
 
             tokenizer.pre_tokenizer = CharDelimiterSplit("_")

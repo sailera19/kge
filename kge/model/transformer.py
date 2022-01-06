@@ -35,6 +35,19 @@ class TransformerScorer(RelationalScorer):
 
         self.enable_text = self.get_option("enable_text")
 
+        if self.enable_text:
+            self.generate_token_mapping(dataset, config, self.configuration_key + ".tokenization")
+
+            _, attention_mask, num_tokens = dataset.index("entity_ids_to_tokens")
+
+            self._text_embedder = KgeEmbedder.create(
+                    config,
+                    dataset,
+                    self.configuration_key + ".text_embedder",
+                    num_tokens)
+            self.text_pos_embeddings = torch.nn.Parameter(torch.zeros((attention_mask.shape[1], self.emb_dim)))
+            self.initialize(self.text_pos_embeddings)
+
         # the CLS embedding
         self.cls_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.cls_emb)
@@ -62,8 +75,14 @@ class TransformerScorer(RelationalScorer):
         self.o_mask = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.o_mask)
 
+        self.mlm_mask_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.mlm_mask_emb)
+
         self.s_dropout = self.get_option("s_dropout")
         self.o_dropout = self.get_option("o_dropout")
+
+        self.s_text_dropout = self.get_option("s_text_dropout")
+        self.o_text_dropout = self.get_option("o_text_dropout")
 
         self.feedforward_dim = self.get_option("encoder.dim_feedforward")
         if not self.feedforward_dim:
@@ -101,16 +120,7 @@ class TransformerScorer(RelationalScorer):
                 self.initialize(layer.self_attn.k_proj_weight)
                 self.initialize(layer.self_attn.v_proj_weight)
 
-        if self.enable_text:
-            self.generate_token_mapping(dataset, config, self.configuration_key + ".tokenization")
 
-            _, _, num_tokens = dataset.index("entity_ids_to_tokens")
-
-            self._text_embedder = KgeEmbedder.create(
-                    config,
-                    dataset,
-                    self.configuration_key + ".text_embedder",
-                    num_tokens)
 
     def generate_token_mapping(self, dataset, config, configuration_key):
         name = "entity_ids_to_tokens"
@@ -157,9 +167,13 @@ class TransformerScorer(RelationalScorer):
 
             s_text_embeddings = self._text_embedder.embed(tokens[ground_truth_s.long()].to(ground_truth_s.device))
 
+            s_text_embeddings += self.text_pos_embeddings
+
             if self.training:
                 s_masked = torch.zeros(len(s_emb), dtype=torch.bool).bernoulli_(self.s_dropout)
                 s_emb[s_masked] = self.s_mask
+                s_text_embeddings_masked = torch.zeros(s_text_embeddings.shape[:2], dtype=torch.bool).bernoulli_(self.s_text_dropout)
+                s_text_embeddings[s_text_embeddings_masked] = self.mlm_mask_emb
 
             # transform the sp pairs
             out = self.encoder.forward(
@@ -179,6 +193,12 @@ class TransformerScorer(RelationalScorer):
                     ),
                     dim=1)
             )  # SxNxE = 3 x batch_size x emb_size
+            if self.training:
+                self_pred_loss = torch.nn.functional.cross_entropy(
+                    torch.mm(out[3:][s_text_embeddings_masked.transpose(1, 0)], self._text_embedder.embed_all().transpose(1, 0)),
+                    tokens[ground_truth_s.long()][s_text_embeddings_masked].to(out.device),
+                )
+
         else:
             out = self.encoder.forward(
                 torch.stack(
@@ -196,22 +216,29 @@ class TransformerScorer(RelationalScorer):
 
         if self.enable_text:
             if combine == "spo":
-                o_text_embeddings = self._text_embedder.embed(tokens[ground_truth_o.long()].to(ground_truth_o.device))
+                o_tokens = tokens[ground_truth_o.long()].to(ground_truth_o.device)
+                o_text_embeddings = self._text_embedder.embed(o_tokens)
                 num_o_embeddings = batch_size
                 o_attention_mask = attention_mask[ground_truth_o.long()].to(ground_truth_o.device)
             else:
                 if targets_o is None:
-                    o_text_embeddings = self._text_embedder.embed(tokens.to(ground_truth_o.device))
+                    o_tokens = tokens.to(ground_truth_o.device)
+                    o_text_embeddings = self._text_embedder.embed(o_tokens)
                     num_o_embeddings = len(tokens)
                     o_attention_mask = attention_mask.to(ground_truth_o.device)
                 else:
-                    o_text_embeddings = self._text_embedder.embed(tokens[targets_o.long()].to(targets_o.device))
+                    o_tokens = tokens[targets_o.long()].to(targets_o.device)
+                    o_text_embeddings = self._text_embedder.embed(o_tokens)
                     num_o_embeddings = len(targets_o)
                     o_attention_mask = attention_mask[targets_o.long()].to(targets_o.device)
+
+            o_text_embeddings += self.text_pos_embeddings
 
             if self.training:
                 o_masked = torch.zeros(len(o_emb), dtype=torch.bool).bernoulli_(self.o_dropout)
                 o_emb[o_masked] = self.o_mask
+                o_text_embeddings_masked = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool).bernoulli_(self.s_text_dropout)
+                o_text_embeddings[o_text_embeddings_masked] = self.mlm_mask_emb
 
             o_emb = self.encoder.forward(
                 torch.cat(
@@ -229,7 +256,15 @@ class TransformerScorer(RelationalScorer):
                         o_attention_mask
                     ),
                     dim=1)
-            )[0, ::]
+            )
+
+            if self.training:
+                self_pred_loss = torch.nn.functional.cross_entropy(
+                    torch.mm(o_emb[3:][o_text_embeddings_masked.transpose(1, 0)],
+                             self._text_embedder.embed_all().transpose(1, 0)),
+                    o_tokens[o_text_embeddings_masked].to(out.device),
+                ) + self_pred_loss
+            o_emb = o_emb[0, ::]
 
         # now take dot product
         if combine == "sp_":
@@ -240,7 +275,10 @@ class TransformerScorer(RelationalScorer):
             raise Exception("can't happen")
 
         # all done
-        return out.view(batch_size, -1)
+        if self.training and self.enable_text:
+            return out.view(batch_size, -1), self_pred_loss
+        else:
+            return out.view(batch_size, -1)
 
 
 class Transformer(KgeModel):
