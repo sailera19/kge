@@ -491,6 +491,19 @@ NOT RECOMMENDED: You can update the timestamp of all cached files using:
         )
         return self._map_indexes(indexes, map_)
 
+    def entity_descriptions(
+        self, indexes: Optional[Union[int, Tensor]] = None
+    ) -> Union[str, List[str], np.ndarray]:
+        """Decode indexes to entity strings.
+
+        See `Dataset#map_indexes` for a description of the `indexes` argument.
+
+        """
+        map_ = self.load_map(
+            "entity_descriptions", as_list=True, ids_key="entity_ids", ignore_duplicates=True
+        )
+        return self._map_indexes(indexes, map_)
+
     def relation_strings(
         self, indexes: Optional[Union[int, Tensor]] = None
     ) -> Union[str, List[str], np.ndarray]:

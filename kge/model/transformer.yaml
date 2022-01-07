@@ -33,11 +33,12 @@ transformer:
     +++: +++
 
   enable_text: False
+  text_source: entities
   tokenization:
     trainer:
       +++: +++
 
-  s_dropout: 0.3
-  o_dropout: 0.3
+  s_dropout: 0.15
+  o_dropout: 0.15
   s_text_dropout: 0.15
   o_text_dropout: 0.15

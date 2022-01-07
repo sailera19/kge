@@ -6,11 +6,16 @@ model: reciprocal_relations_model
 reciprocal_relations_model.base_model:
   type: transformer
 
+  s_dropout: 0.05
+  o_dropout: 0.05
+  s_text_dropout: 0.15
+  o_text_dropout: 0.15
 
   tokenization:
     trainer:
-      min_frequency: 5
+      min_frequency: 2
   enable_text: True
+  text_source: descriptions
 #  entity_embedder:
 #    type: text_transformer_embedder
 #    tokenization:
@@ -28,7 +33,7 @@ train:
   optimizer: Adam
   optimizer_args:
     lr: 0.001
-  batch_size: 512
+  batch_size: 64
   max_epochs: 500
   loss: kl
   type: negative_sampling
@@ -44,25 +49,25 @@ negative_sampling:
   with_replacement: False
   implementation: batch
   num_samples:
-    s: 2048
+    s: 128
 
 transformer:
   entity_embedder:
     initialize: xavier_normal_
-    dim: 320
+    dim: 128
     dropout: 0.6
   relation_embedder:
     initialize: xavier_normal_
-    dim: 320
+    dim: 128
     dropout: 0.6
   text_embedder:
     initialize: xavier_normal_
-    dim: 320
+    dim: 128
     dropout: 0.6
 
 valid:
   early_stopping:
-    patience: 5
+    patience: 10
   every: 5
   metric: mean_reciprocal_rank_filtered_with_test
 

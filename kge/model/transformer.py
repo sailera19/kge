@@ -3,7 +3,7 @@ import torch
 import torch.nn
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
-from tokenizers.pre_tokenizers import CharDelimiterSplit
+from tokenizers.pre_tokenizers import CharDelimiterSplit, Sequence, Digits, Whitespace, BertPreTokenizer
 from torch import Tensor
 import math
 
@@ -32,6 +32,9 @@ class TransformerScorer(RelationalScorer):
     def __init__(self, config: Config, dataset: Dataset, configuration_key=None):
         super().__init__(config, dataset, configuration_key)
         self.emb_dim = self.get_option("entity_embedder.dim")
+        self.s_embedder: KgeEmbedder = None
+        self.p_embedder: KgeEmbedder = None
+        self.o_embedder: KgeEmbedder = None
 
         self.enable_text = self.get_option("enable_text")
 
@@ -120,19 +123,28 @@ class TransformerScorer(RelationalScorer):
                 self.initialize(layer.self_attn.k_proj_weight)
                 self.initialize(layer.self_attn.v_proj_weight)
 
-
+    def set_embedders(self, s_embedder, p_embedder, o_embedder):
+        self.s_embedder = s_embedder
+        self.p_embedder = p_embedder
+        self.o_embedder = o_embedder
 
     def generate_token_mapping(self, dataset, config, configuration_key):
         name = "entity_ids_to_tokens"
 
         if not dataset._indexes.get(name):
-            entity_ids_to_strings = np.array(dataset.entity_strings())
+            if self.get_option("text_source") == "descriptions":
+                entity_ids_to_strings = dataset.entity_descriptions()
+            else:
+                entity_ids_to_strings = dataset.entity_strings()
+            entity_ids_to_strings = [x.replace("_", " ") if isinstance(x, str) else "[UNK]" for x in entity_ids_to_strings]
+            entity_ids_to_strings = np.array(entity_ids_to_strings)
             train_triples = dataset.load_triples("train")
             strings_in_train = entity_ids_to_strings[torch.cat((train_triples[:, 0], train_triples[:, 2])).unique()]
             strings_in_train = strings_in_train[~(strings_in_train == None)]
+
             tokenizer = Tokenizer(BPE())
 
-            tokenizer.pre_tokenizer = CharDelimiterSplit("_")
+            tokenizer.pre_tokenizer = BertPreTokenizer()
 
             from tokenizers.trainers import BpeTrainer
 
@@ -161,6 +173,9 @@ class TransformerScorer(RelationalScorer):
             )
 
         batch_size = len(s_emb)
+
+        self_pred_loss = 0
+        self_pred_loss_weight = 0
 
         if self.enable_text:
             tokens, attention_mask, _ = self.dataset.index("entity_ids_to_tokens")
@@ -194,10 +209,18 @@ class TransformerScorer(RelationalScorer):
                     dim=1)
             )  # SxNxE = 3 x batch_size x emb_size
             if self.training:
-                self_pred_loss = torch.nn.functional.cross_entropy(
-                    torch.mm(out[3:][s_text_embeddings_masked.transpose(1, 0)], self._text_embedder.embed_all().transpose(1, 0)),
-                    tokens[ground_truth_s.long()][s_text_embeddings_masked].to(out.device),
-                )
+                if self.s_dropout > 0 and s_masked.any():
+                    self_pred_loss += torch.nn.functional.cross_entropy(
+                        torch.mm(out[1][s_masked], self.s_embedder.embed_all().transpose(1, 0)),
+                        ground_truth_s[s_masked],
+                    )
+                    self_pred_loss_weight += 1
+                if self.s_text_dropout > 0 and s_text_embeddings_masked.any():
+                    self_pred_loss += torch.nn.functional.cross_entropy(
+                        torch.mm(out[3:][s_text_embeddings_masked.transpose(1, 0)], self._text_embedder.embed_all().transpose(1, 0)),
+                        tokens[ground_truth_s.long()][s_text_embeddings_masked].to(out.device),
+                    )
+                    self_pred_loss_weight +=1
 
         else:
             out = self.encoder.forward(
@@ -216,6 +239,7 @@ class TransformerScorer(RelationalScorer):
 
         if self.enable_text:
             if combine == "spo":
+                targets_o = ground_truth_o
                 o_tokens = tokens[ground_truth_o.long()].to(ground_truth_o.device)
                 o_text_embeddings = self._text_embedder.embed(o_tokens)
                 num_o_embeddings = batch_size
@@ -259,11 +283,19 @@ class TransformerScorer(RelationalScorer):
             )
 
             if self.training:
-                self_pred_loss = torch.nn.functional.cross_entropy(
-                    torch.mm(o_emb[3:][o_text_embeddings_masked.transpose(1, 0)],
-                             self._text_embedder.embed_all().transpose(1, 0)),
-                    o_tokens[o_text_embeddings_masked].to(out.device),
-                ) + self_pred_loss
+                if self.o_dropout > 0 and o_masked.any():
+                    self_pred_loss += torch.nn.functional.cross_entropy(
+                        torch.mm(o_emb[1][o_masked], self.o_embedder.embed_all().transpose(1, 0)),
+                        targets_o[o_masked],
+                    )
+                    self_pred_loss_weight += 1
+                if self.o_text_dropout > 0 and o_text_embeddings_masked.any():
+                    self_pred_loss += torch.nn.functional.cross_entropy(
+                        torch.mm(o_emb[3:][o_text_embeddings_masked.transpose(1, 0)],
+                                 self._text_embedder.embed_all().transpose(1, 0)),
+                        o_tokens[o_text_embeddings_masked].to(out.device),
+                    )
+                    self_pred_loss_weight += 1
             o_emb = o_emb[0, ::]
 
         # now take dot product
@@ -276,7 +308,7 @@ class TransformerScorer(RelationalScorer):
 
         # all done
         if self.training and self.enable_text:
-            return out.view(batch_size, -1), self_pred_loss
+            return out.view(batch_size, -1), self_pred_loss / self_pred_loss_weight
         else:
             return out.view(batch_size, -1)
 
@@ -299,6 +331,7 @@ class Transformer(KgeModel):
             configuration_key=self.configuration_key,
             init_for_load_only=init_for_load_only,
         )
+        self.get_scorer().set_embedders(self.get_s_embedder(), self.get_p_embedder(), self.get_o_embedder())
 
     def score_spo(self, s: Tensor, p: Tensor, o: Tensor, direction=None, **kwargs) -> Tensor:
         # We overwrite this method to ensure that ConvE only predicts towards objects.
