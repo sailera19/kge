@@ -307,6 +307,14 @@ train:
 1vsAll:
   class_name: TrainingJob1vsAll
 
+1vsBatch:
+  class_name: TrainingJob1vsBatch
+  self_pred_loss:
+    factor_type: fixed
+    factor: 1.0
+    smoothing: 0
+    max_epoch: 500
+
 
 # Options for KvsAll training (train.type=="KvsAll")
 KvsAll:

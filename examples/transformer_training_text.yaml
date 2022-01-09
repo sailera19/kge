@@ -33,10 +33,10 @@ train:
   optimizer: Adam
   optimizer_args:
     lr: 0.001
-  batch_size: 64
+  batch_size: 256
   max_epochs: 500
   loss: kl
-  type: negative_sampling
+  type: 1vsBatch
   lr_scheduler: ReduceLROnPlateau
   lr_scheduler_args:
     mode: max
@@ -50,6 +50,13 @@ negative_sampling:
   implementation: batch
   num_samples:
     s: 128
+
+1vsBatch:
+  self_pred_loss:
+    factor_type: decreasing
+    factor: 0.8
+    max_epoch: 400
+    smoothing: 0
 
 transformer:
   entity_embedder:
