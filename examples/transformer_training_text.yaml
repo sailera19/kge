@@ -6,10 +6,19 @@ model: reciprocal_relations_model
 reciprocal_relations_model.base_model:
   type: transformer
 
+  self_pred_loss_weighing: by_count
   s_dropout: 0.05
   o_dropout: 0.05
+  s_dropout_masked: 1.0
+  o_dropout_masked: 1.0
+  s_dropout_replaced: 0.0
+  o_dropout_replaced: 0.0
   s_text_dropout: 0.15
   o_text_dropout: 0.15
+  s_text_dropout_masked: 1.0
+  o_text_dropout_masked: 1.0
+  s_text_dropout_replaced: 0.0
+  o_text_dropout_replaced: 0.0
 
   tokenization:
     trainer:
@@ -61,15 +70,15 @@ negative_sampling:
 transformer:
   entity_embedder:
     initialize: xavier_normal_
-    dim: 128
+    dim: 80
     dropout: 0.6
   relation_embedder:
     initialize: xavier_normal_
-    dim: 128
+    dim: 80
     dropout: 0.6
   text_embedder:
     initialize: xavier_normal_
-    dim: 128
+    dim: 80
     dropout: 0.6
 
 valid:

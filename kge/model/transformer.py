@@ -37,6 +37,7 @@ class TransformerScorer(RelationalScorer):
         self.o_embedder: KgeEmbedder = None
 
         self.enable_text = self.get_option("enable_text")
+        self.self_pred_loss_weighing = self.get_option("self_pred_loss_weighing")
 
         if self.enable_text:
             self.generate_token_mapping(dataset, config, self.configuration_key + ".tokenization")
@@ -83,9 +84,17 @@ class TransformerScorer(RelationalScorer):
 
         self.s_dropout = self.get_option("s_dropout")
         self.o_dropout = self.get_option("o_dropout")
+        self.s_dropout_masked = self.get_option("s_dropout_masked")
+        self.o_dropout_masked = self.get_option("o_dropout_masked")
+        self.s_dropout_replaced = self.get_option("s_dropout_replaced")
+        self.o_dropout_replaced = self.get_option("o_dropout_replaced")
 
         self.s_text_dropout = self.get_option("s_text_dropout")
         self.o_text_dropout = self.get_option("o_text_dropout")
+        self.s_text_dropout_masked = self.get_option("s_text_dropout_masked")
+        self.o_text_dropout_masked = self.get_option("o_text_dropout_masked")
+        self.s_text_dropout_replaced = self.get_option("s_text_dropout_replaced")
+        self.o_text_dropout_replaced = self.get_option("o_text_dropout_replaced")
 
         self.feedforward_dim = self.get_option("encoder.dim_feedforward")
         if not self.feedforward_dim:
@@ -177,6 +186,8 @@ class TransformerScorer(RelationalScorer):
         self_pred_loss = 0
         self_pred_loss_weight = 0
 
+        self_pred_loss_s_dropout, self_pred_loss_s_text_dropout, self_pred_loss_o_dropout, self_pred_loss_o_text_dropout = 0, 0, 0, 0
+
         if self.enable_text:
             tokens, attention_mask, _ = self.dataset.index("entity_ids_to_tokens")
 
@@ -185,10 +196,16 @@ class TransformerScorer(RelationalScorer):
             s_text_embeddings += self.text_pos_embeddings
 
             if self.training:
-                s_masked = torch.zeros(len(s_emb), dtype=torch.bool).bernoulli_(self.s_dropout)
+                s_dropout = torch.zeros(len(s_emb), dtype=torch.bool).bernoulli_(self.s_dropout)
+                s_masked = torch.zeros(len(s_emb), dtype=torch.bool).bernoulli_(self.s_dropout_masked) & s_dropout
+                s_replaced = torch.zeros(len(s_emb), dtype=torch.bool).bernoulli_(self.s_dropout_replaced) & s_dropout & ~s_masked
                 s_emb[s_masked] = self.s_mask
-                s_text_embeddings_masked = torch.zeros(s_text_embeddings.shape[:2], dtype=torch.bool).bernoulli_(self.s_text_dropout)
+                s_emb[s_replaced] = self.s_embedder.embed(torch.randint(low=0, high=self.dataset.num_entities(), size=(s_replaced.sum(),), device=s_emb.device))
+                s_text_embeddings_dropout = torch.zeros(s_text_embeddings.shape[:2], dtype=torch.bool).bernoulli_(self.s_text_dropout)
+                s_text_embeddings_masked = torch.zeros(s_text_embeddings.shape[:2], dtype=torch.bool).bernoulli_(self.s_text_dropout_masked) & s_text_embeddings_dropout
+                s_text_embeddings_replaced = torch.zeros(s_text_embeddings.shape[:2], dtype=torch.bool).bernoulli_(self.s_text_dropout_replaced) & s_text_embeddings_dropout & ~s_text_embeddings_masked
                 s_text_embeddings[s_text_embeddings_masked] = self.mlm_mask_emb
+                s_text_embeddings[s_text_embeddings_replaced] = self._text_embedder.embed(torch.randint(low=0, high=len(self._text_embedder._embeddings.weight), size=(s_text_embeddings_replaced.sum(),), device=s_text_embeddings.device))
 
             # transform the sp pairs
             out = self.encoder.forward(
@@ -209,18 +226,18 @@ class TransformerScorer(RelationalScorer):
                     dim=1)
             )  # SxNxE = 3 x batch_size x emb_size
             if self.training:
-                if self.s_dropout > 0 and s_masked.any():
-                    self_pred_loss += torch.nn.functional.cross_entropy(
-                        torch.mm(out[1][s_masked], self.s_embedder.embed_all().transpose(1, 0)),
-                        ground_truth_s[s_masked],
+                if self.s_dropout > 0 and s_dropout.any():
+                    self_pred_loss_s_dropout = torch.nn.functional.cross_entropy(
+                        torch.mm(out[1][s_dropout], self.s_embedder.embed_all().transpose(1, 0)),
+                        ground_truth_s[s_dropout],
                     )
                     self_pred_loss_weight += 1
-                if self.s_text_dropout > 0 and s_text_embeddings_masked.any():
-                    self_pred_loss += torch.nn.functional.cross_entropy(
-                        torch.mm(out[3:][s_text_embeddings_masked.transpose(1, 0)], self._text_embedder.embed_all().transpose(1, 0)),
-                        tokens[ground_truth_s.long()][s_text_embeddings_masked].to(out.device),
+                if self.s_text_dropout > 0 and s_text_embeddings_dropout.any():
+                    self_pred_loss_s_text_dropout = torch.nn.functional.cross_entropy(
+                        torch.mm(out[3:][s_text_embeddings_dropout.transpose(1, 0)], self._text_embedder.embed_all().transpose(1, 0)),
+                        tokens[ground_truth_s.long()][s_text_embeddings_dropout].to(out.device),
                     )
-                    self_pred_loss_weight +=1
+                    self_pred_loss_weight += 1
 
         else:
             out = self.encoder.forward(
@@ -259,10 +276,21 @@ class TransformerScorer(RelationalScorer):
             o_text_embeddings += self.text_pos_embeddings
 
             if self.training:
-                o_masked = torch.zeros(len(o_emb), dtype=torch.bool).bernoulli_(self.o_dropout)
+                o_dropout = torch.zeros(len(o_emb), dtype=torch.bool).bernoulli_(self.o_dropout)
+                o_masked = torch.zeros(len(o_emb), dtype=torch.bool).bernoulli_(self.o_dropout_masked) & o_dropout
+                o_replaced = torch.zeros(len(o_emb), dtype=torch.bool).bernoulli_(self.o_dropout_replaced) & o_dropout & ~o_masked
                 o_emb[o_masked] = self.o_mask
-                o_text_embeddings_masked = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool).bernoulli_(self.s_text_dropout)
+                o_emb[o_replaced] = self.o_embedder.embed(torch.randint(low=0, high=self.dataset.num_entities(), size=(o_replaced.sum(),), device=o_emb.device))
+                o_text_embeddings_dropout = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool).bernoulli_(
+                    self.o_text_dropout)
+                o_text_embeddings_masked = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool).bernoulli_(
+                    self.o_text_dropout_masked) & o_text_embeddings_dropout
+                o_text_embeddings_replaced = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool).bernoulli_(
+                    self.o_text_dropout_replaced) & o_text_embeddings_dropout & ~o_text_embeddings_masked
                 o_text_embeddings[o_text_embeddings_masked] = self.mlm_mask_emb
+                o_text_embeddings[o_text_embeddings_replaced] = self._text_embedder.embed(
+                    torch.randint(low=0, high=len(self._text_embedder._embeddings.weight),
+                                  size=(o_text_embeddings_replaced.sum(),), device=o_text_embeddings.device))
 
             o_emb = self.encoder.forward(
                 torch.cat(
@@ -283,17 +311,17 @@ class TransformerScorer(RelationalScorer):
             )
 
             if self.training:
-                if self.o_dropout > 0 and o_masked.any():
-                    self_pred_loss += torch.nn.functional.cross_entropy(
-                        torch.mm(o_emb[1][o_masked], self.o_embedder.embed_all().transpose(1, 0)),
-                        targets_o[o_masked],
+                if self.o_dropout > 0 and o_dropout.any():
+                    self_pred_loss_o_dropout += torch.nn.functional.cross_entropy(
+                        torch.mm(o_emb[1][o_dropout], self.o_embedder.embed_all().transpose(1, 0)),
+                        targets_o[o_dropout],
                     )
                     self_pred_loss_weight += 1
-                if self.o_text_dropout > 0 and o_text_embeddings_masked.any():
-                    self_pred_loss += torch.nn.functional.cross_entropy(
-                        torch.mm(o_emb[3:][o_text_embeddings_masked.transpose(1, 0)],
+                if self.o_text_dropout > 0 and o_text_embeddings_dropout.any():
+                    self_pred_loss_o_text_dropout += torch.nn.functional.cross_entropy(
+                        torch.mm(o_emb[3:][o_text_embeddings_dropout.transpose(1, 0)],
                                  self._text_embedder.embed_all().transpose(1, 0)),
-                        o_tokens[o_text_embeddings_masked].to(out.device),
+                        o_tokens[o_text_embeddings_dropout].to(out.device),
                     )
                     self_pred_loss_weight += 1
             o_emb = o_emb[0, ::]
@@ -308,7 +336,26 @@ class TransformerScorer(RelationalScorer):
 
         # all done
         if self.training and self.enable_text:
-            return out.view(batch_size, -1), self_pred_loss / self_pred_loss_weight
+            if self.self_pred_loss_weighing == "by_count":
+                self_pred_loss = (
+                    self_pred_loss_s_dropout * s_dropout.sum()
+                    + self_pred_loss_o_dropout * o_dropout.sum()
+                    + self_pred_loss_s_text_dropout * s_text_embeddings_dropout.sum()
+                    + self_pred_loss_o_text_dropout * o_text_embeddings_dropout.sum()
+                                 ) / (
+                    s_dropout.sum()
+                    + o_dropout.sum()
+                    + s_text_embeddings_dropout.sum()
+                    + o_text_embeddings_dropout.sum()
+                )
+            else:
+                self_pred_loss = (
+                    self_pred_loss_s_dropout
+                    + self_pred_loss_o_dropout
+                    + self_pred_loss_s_text_dropout
+                    + self_pred_loss_o_text_dropout) / self_pred_loss_weight
+
+            return out.view(batch_size, -1), self_pred_loss
         else:
             return out.view(batch_size, -1)
 

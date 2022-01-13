@@ -38,7 +38,18 @@ transformer:
     trainer:
       +++: +++
 
-  s_dropout: 0.15
-  o_dropout: 0.15
-  s_text_dropout: 0.15
-  o_text_dropout: 0.15
+  s_dropout: 0.3
+  o_dropout: 0.3
+  s_dropout_masked: 0.5
+  o_dropout_masked: 0.5
+  s_dropout_replaced: 0.2
+  o_dropout_replaced: 0.2
+  s_text_dropout: 0.3
+  o_text_dropout: 0.3
+  s_text_dropout_masked: 0.5
+  o_text_dropout_masked: 0.5
+  s_text_dropout_replaced: 0.2
+  o_text_dropout_replaced: 0.2
+
+  # equal, by_count
+  self_pred_loss_weighing: by_count
