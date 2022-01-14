@@ -183,10 +183,7 @@ class TransformerScorer(RelationalScorer):
 
         batch_size = len(s_emb)
 
-        self_pred_loss = 0
-        self_pred_loss_weight = 0
-
-        self_pred_loss_s_dropout, self_pred_loss_s_text_dropout, self_pred_loss_o_dropout, self_pred_loss_o_text_dropout = 0, 0, 0, 0
+        self_pred_loss_dropout, self_pred_loss_text_dropout = 0, 0
 
         if self.enable_text:
             tokens, attention_mask, _ = self.dataset.index("entity_ids_to_tokens")
@@ -207,54 +204,7 @@ class TransformerScorer(RelationalScorer):
                 s_text_embeddings[s_text_embeddings_masked] = self.mlm_mask_emb
                 s_text_embeddings[s_text_embeddings_replaced] = self._text_embedder.embed(torch.randint(low=0, high=len(self._text_embedder._embeddings.weight), size=(s_text_embeddings_replaced.sum(),), device=s_text_embeddings.device))
 
-            # transform the sp pairs
-            out = self.encoder.forward(
-                torch.cat(
-                    (
-                        self.cls_emb.repeat((1, batch_size, 1)),
-                        (s_emb + self.sub_type_emb.unsqueeze(0)).unsqueeze(0),
-                        (p_emb + self.rel_type_emb.unsqueeze(0)).unsqueeze(0),
-                        (s_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0)
-                    ),
-                    dim=0,
-                ),
-                src_key_padding_mask=~torch.cat(
-                    (
-                        torch.ones(batch_size, 3, dtype=torch.bool, device=ground_truth_s.device),
-                        attention_mask[ground_truth_s.long()].to(ground_truth_s.device)
-                    ),
-                    dim=1)
-            )  # SxNxE = 3 x batch_size x emb_size
-            if self.training:
-                if self.s_dropout > 0 and s_dropout.any():
-                    self_pred_loss_s_dropout = torch.nn.functional.cross_entropy(
-                        torch.mm(out[1][s_dropout], self.s_embedder.embed_all().transpose(1, 0)),
-                        ground_truth_s[s_dropout],
-                    )
-                    self_pred_loss_weight += 1
-                if self.s_text_dropout > 0 and s_text_embeddings_dropout.any():
-                    self_pred_loss_s_text_dropout = torch.nn.functional.cross_entropy(
-                        torch.mm(out[3:][s_text_embeddings_dropout.transpose(1, 0)], self._text_embedder.embed_all().transpose(1, 0)),
-                        tokens[ground_truth_s.long()][s_text_embeddings_dropout].to(out.device),
-                    )
-                    self_pred_loss_weight += 1
 
-        else:
-            out = self.encoder.forward(
-                torch.stack(
-                    (
-                        self.cls_emb.repeat((batch_size, 1)),
-                        s_emb + self.sub_type_emb.unsqueeze(0),
-                        p_emb + self.rel_type_emb.unsqueeze(0),
-                    ),
-                    dim=0,
-                )
-            )  # SxNxE = 3 x batch_size x emb_size
-
-        # pick the transformed CLS embeddings
-        out = out[0, ::]
-
-        if self.enable_text:
             if combine == "spo":
                 targets_o = ground_truth_o
                 o_tokens = tokens[ground_truth_o.long()].to(ground_truth_o.device)
@@ -292,39 +242,73 @@ class TransformerScorer(RelationalScorer):
                     torch.randint(low=0, high=len(self._text_embedder._embeddings.weight),
                                   size=(o_text_embeddings_replaced.sum(),), device=o_text_embeddings.device))
 
-            o_emb = self.encoder.forward(
-                torch.cat(
-                    (
-                        self.o_cls_emb.repeat((1, num_o_embeddings, 1)),
-                        (o_emb + self.o_type_emb.unsqueeze(0)).unsqueeze(0),
-                        (self.any_rel_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_type_emb),
-                        (o_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0),
+            # transform the sp pairs
+            out = self.encoder.forward(
+                torch.cat((
+                    torch.cat(
+                        (
+                            self.cls_emb.repeat((1, batch_size, 1)),
+                            (s_emb + self.sub_type_emb.unsqueeze(0)).unsqueeze(0),
+                            (p_emb + self.rel_type_emb.unsqueeze(0)).unsqueeze(0),
+                            (s_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0)
+                        ),
+                        dim=0,
                     ),
-                    dim=0,
-                ),
-                src_key_padding_mask=~torch.cat(
-                    (
-                        torch.ones(num_o_embeddings, 3, dtype=torch.bool, device=ground_truth_o.device),
+                    torch.cat(
+                        (
+                            self.o_cls_emb.repeat((1, num_o_embeddings, 1)),
+                            (o_emb + self.o_type_emb.unsqueeze(0)).unsqueeze(0),
+                            (self.any_rel_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_type_emb),
+                            (o_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0),
+                        ),
+                        dim=0,
+                    )
+                ), dim=1),
+                src_key_padding_mask=torch.cat((
+                    ~torch.cat((
+                        torch.ones(batch_size, 3, dtype=torch.bool, device=ground_truth_s.device),
+                        attention_mask[ground_truth_s.long()].to(ground_truth_s.device)
+                    ), dim=1),
+                    ~torch.cat((
+                        torch.ones(num_o_embeddings, 3, dtype=torch.bool,
+                                   device=ground_truth_o.device),
                         o_attention_mask
-                    ),
-                    dim=1)
-            )
+                    ), dim=1)
+                ), dim=0)
+            )  # SxNxE = 3 x batch_size x emb_size
+
 
             if self.training:
-                if self.o_dropout > 0 and o_dropout.any():
-                    self_pred_loss_o_dropout += torch.nn.functional.cross_entropy(
-                        torch.mm(o_emb[1][o_dropout], self.o_embedder.embed_all().transpose(1, 0)),
-                        targets_o[o_dropout],
+                if s_dropout.any() or o_dropout.any():
+                    self_pred_loss_dropout = torch.nn.functional.cross_entropy(
+                        torch.mm(out[1][torch.cat((s_dropout, o_dropout))], self.s_embedder.embed_all().transpose(1, 0)),
+                        torch.cat((ground_truth_s[s_dropout], targets_o[o_dropout])),
                     )
-                    self_pred_loss_weight += 1
-                if self.o_text_dropout > 0 and o_text_embeddings_dropout.any():
-                    self_pred_loss_o_text_dropout += torch.nn.functional.cross_entropy(
-                        torch.mm(o_emb[3:][o_text_embeddings_dropout.transpose(1, 0)],
-                                 self._text_embedder.embed_all().transpose(1, 0)),
-                        o_tokens[o_text_embeddings_dropout].to(out.device),
+                if s_text_embeddings_dropout.any() or o_text_embeddings.any():
+                    self_pred_loss_text_dropout = torch.nn.functional.cross_entropy(
+                        torch.mm(out[3:][torch.cat((s_text_embeddings_dropout.transpose(1, 0), o_text_embeddings_dropout.transpose(1, 0)), dim=1)], self._text_embedder.embed_all().transpose(1, 0)),
+                        torch.cat((tokens[ground_truth_s.long()][s_text_embeddings_dropout].to(out.device), o_tokens[o_text_embeddings_dropout].to(out.device))),
                     )
-                    self_pred_loss_weight += 1
+
+            o_emb = out[:, batch_size:]
+            out = out[:, :batch_size]
+
             o_emb = o_emb[0, ::]
+
+        else:
+            out = self.encoder.forward(
+                torch.stack(
+                    (
+                        self.cls_emb.repeat((batch_size, 1)),
+                        s_emb + self.sub_type_emb.unsqueeze(0),
+                        p_emb + self.rel_type_emb.unsqueeze(0),
+                    ),
+                    dim=0,
+                )
+            )  # SxNxE = 3 x batch_size x emb_size
+
+        # pick the transformed CLS embeddings
+        out = out[0, ::]
 
         # now take dot product
         if combine == "sp_":
@@ -338,10 +322,8 @@ class TransformerScorer(RelationalScorer):
         if self.training and self.enable_text:
             if self.self_pred_loss_weighing == "by_count":
                 self_pred_loss = (
-                    self_pred_loss_s_dropout * s_dropout.sum()
-                    + self_pred_loss_o_dropout * o_dropout.sum()
-                    + self_pred_loss_s_text_dropout * s_text_embeddings_dropout.sum()
-                    + self_pred_loss_o_text_dropout * o_text_embeddings_dropout.sum()
+                    self_pred_loss_dropout * (s_dropout.sum() + o_dropout.sum())
+                    + self_pred_loss_text_dropout * (s_text_embeddings_dropout.sum() + o_text_embeddings_dropout.sum())
                                  ) / (
                     s_dropout.sum()
                     + o_dropout.sum()
@@ -349,11 +331,8 @@ class TransformerScorer(RelationalScorer):
                     + o_text_embeddings_dropout.sum()
                 )
             else:
-                self_pred_loss = (
-                    self_pred_loss_s_dropout
-                    + self_pred_loss_o_dropout
-                    + self_pred_loss_s_text_dropout
-                    + self_pred_loss_o_text_dropout) / self_pred_loss_weight
+                self_pred_loss = (self_pred_loss_dropout + self_pred_loss_text_dropout) / (
+                        (self_pred_loss_dropout > 0) + (self_pred_loss_text_dropout > 0))
 
             return out.view(batch_size, -1), self_pred_loss
         else:
