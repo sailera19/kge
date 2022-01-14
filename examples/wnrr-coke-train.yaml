@@ -1,0 +1,49 @@
+job.type: train
+dataset.name: wnrr
+
+model: coke
+
+train:
+  batch_size: 512
+  loss_arg: .1
+  lr_warmup: 50
+  lr_scheduler: LinearLR
+  lr_scheduler_args:
+    start_factor: 1
+    end_factor: 0
+    total_iters: 450
+  max_epochs: 500
+  optimizer: Adamax
+  optimizer_args:
+    lr: 0.008
+    eps: 1e-6
+    weight_decay: 0.01
+  type: 1vsAll
+
+valid:
+  early_stopping:
+    patience: 10
+    min_threshold:
+      epochs: 50
+      metric_value: 0.05
+  every: 5
+  metric: mean_reciprocal_rank_filtered_with_test
+
+eval:
+  batch_size: 1000
+
+lookup_embedder:
+  dim: 320
+  initialize: normal_
+  initialize_args:
+    normal_:
+      std: 0.02
+  dropout: 0.
+
+#conve:
+#  feature_map_dropout: 0.48769345636955713
+#  projection_dropout: 0.5
+#  relation_embedder:
+#    dropout: 0.11757230155305998
+#    regularize_weight: 2.231687936571624e-14
+#  round_dim: true

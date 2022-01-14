@@ -14,6 +14,7 @@ from kge.model.rescal import Rescal
 from kge.model.transe import TransE
 from kge.model.transformer import Transformer
 from kge.model.hitter import Hitter
+from kge.model.coke import CokE
 from kge.model.transh import TransH
 from kge.model.rotate import RotatE
 from kge.model.cp import CP
