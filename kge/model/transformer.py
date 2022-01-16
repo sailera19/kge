@@ -284,7 +284,7 @@ class TransformerScorer(RelationalScorer):
                         torch.mm(out[1][torch.cat((s_dropout, o_dropout))], self.s_embedder.embed_all().transpose(1, 0)),
                         torch.cat((ground_truth_s[s_dropout], targets_o[o_dropout])),
                     )
-                if s_text_embeddings_dropout.any() or o_text_embeddings.any():
+                if s_text_embeddings_dropout.any() or o_text_embeddings_dropout.any():
                     self_pred_loss_text_dropout = torch.nn.functional.cross_entropy(
                         torch.mm(out[3:][torch.cat((s_text_embeddings_dropout.transpose(1, 0), o_text_embeddings_dropout.transpose(1, 0)), dim=1)], self._text_embedder.embed_all().transpose(1, 0)),
                         torch.cat((tokens[ground_truth_s.long()][s_text_embeddings_dropout].to(out.device), o_tokens[o_text_embeddings_dropout].to(out.device))),

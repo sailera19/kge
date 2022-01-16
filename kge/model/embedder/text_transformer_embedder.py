@@ -1,7 +1,7 @@
 import numpy as np
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
-from tokenizers.pre_tokenizers import CharDelimiterSplit
+from tokenizers.pre_tokenizers import CharDelimiterSplit, BertPreTokenizer
 from torch import Tensor
 import torch.nn
 import torch.nn.functional
@@ -29,7 +29,7 @@ class TextTransformerEmbedder(KgeEmbedder):
 
         self.entity_vocab_size = vocab_size
 
-        _, _, vocab_size = self.generate_token_mapping(dataset, config, configuration_key)
+        _, _, vocab_size = self.generate_token_mapping(dataset, config, configuration_key + ".tokenization")
 
         # read config
         self.normalize_p = self.get_option("normalize.p")
@@ -37,6 +37,14 @@ class TextTransformerEmbedder(KgeEmbedder):
         self.sparse = self.get_option("sparse")
         self.config.check("train.trace_level", ["batch", "epoch"])
         self.vocab_size = vocab_size
+        
+        # self_loss:
+        self.entity_dropout = self.get_option("self_loss.entity_dropout")
+        self.entity_dropout_masked = self.get_option("self_loss.entity_dropout_masked")
+        self.entity_dropout_replaced = self.get_option("self_loss.entity_dropout_replaced")
+        self.text_dropout = self.get_option("self_loss.text_dropout")
+        self.text_dropout_masked = self.get_option("self_loss.text_dropout_masked")
+        self.text_dropout_replaced = self.get_option("self_loss.text_dropout_replaced")
 
         round_embedder_dim_to = self.get_option("round_dim_to")
         if len(round_embedder_dim_to) > 0:
@@ -72,6 +80,8 @@ class TextTransformerEmbedder(KgeEmbedder):
         self.combine_cls_emb = torch.nn.parameter.Parameter(torch.zeros(self.dim))
         self.initialize(self.combine_cls_emb)
 
+        self.entity_mask_emb = torch.nn.parameter.Parameter(torch.zeros(self.dim))
+        self.initialize(self.entity_mask_emb)
         self.mlm_mask_emb = torch.nn.parameter.Parameter(torch.zeros(self.dim))
         self.initialize(self.mlm_mask_emb)
 
@@ -221,7 +231,7 @@ class TextTransformerEmbedder(KgeEmbedder):
 
             # normalize after each batch
             job.post_batch_hooks.append(lambda job: self._normalize_embeddings())
-        job.pre_run_hooks.append(self._pretrain_text)
+        # job.pre_run_hooks.append(self._pretrain_text)
 
 
 
@@ -254,6 +264,26 @@ class TextTransformerEmbedder(KgeEmbedder):
         if self.dropout.p > 0:
             entity_embeddings = self.dropout(entity_embeddings)
 
+        if self.training:
+            entity_dropout = torch.zeros(len(entity_embeddings), dtype=torch.bool).bernoulli_(self.entity_dropout)
+            entity_masked = torch.zeros(len(entity_embeddings), dtype=torch.bool).bernoulli_(self.entity_dropout_masked) & entity_dropout
+            entity_replaced = torch.zeros(len(entity_embeddings), dtype=torch.bool).bernoulli_(
+                self.entity_dropout_replaced) & entity_dropout & ~entity_masked
+            entity_embeddings[entity_masked] = self.entity_mask_emb
+            entity_embeddings[entity_replaced] = self._entity_embeddings(
+                torch.randint(low=0, high=self.dataset.num_entities(), size=(entity_replaced.sum(),), device=entity_embeddings.device))
+
+            text_embeddings_dropout = torch.zeros(text_embeddings.shape[:2], dtype=torch.bool).bernoulli_(
+                self.text_dropout)
+            text_embeddings_masked = torch.zeros(text_embeddings.shape[:2], dtype=torch.bool).bernoulli_(
+                self.text_dropout_masked) & text_embeddings_dropout
+            text_embeddings_replaced = torch.zeros(text_embeddings.shape[:2], dtype=torch.bool).bernoulli_(
+                self.text_dropout_replaced) & text_embeddings_dropout & ~text_embeddings_masked
+            text_embeddings[text_embeddings_masked] = self.mlm_mask_emb
+            text_embeddings[text_embeddings_replaced] = self._embeddings(
+                torch.randint(low=0, high=len(self._embeddings.weight),
+                              size=(text_embeddings_replaced.sum(),), device=text_embeddings.device))
+
         # transform the sp pairs
         text_embeddings = self.text_encoder.forward(
             self.layer_norm(torch.cat(
@@ -270,7 +300,19 @@ class TextTransformerEmbedder(KgeEmbedder):
                     attention_mask[indexes.long()].to(text_embeddings.device)
                 ),
                 dim=1)
-        )[0, :]
+        )
+
+        if self.training:
+            if entity_dropout.any():
+                self_pred_loss_entity_dropout = torch.nn.functional.cross_entropy(
+                    torch.mm(text_embeddings[1][entity_dropout], self._entity_embeddings.weight.transpose(1, 0)),
+                    indexes[entity_dropout])
+            if text_embeddings_dropout.any():
+                self_pred_loss_text_dropout = torch.nn.functional.cross_entropy(
+                    torch.mm(text_embeddings[2:][text_embeddings_dropout.transpose(1, 0)],
+                             self._embeddings.weight.transpose(1, 0)),
+                    tokens[indexes.long()][text_embeddings_dropout].to(text_embeddings.device),
+                )
 
         #text_embeddings = self.combine_encoder.forward(
         #    torch.cat(
@@ -282,7 +324,12 @@ class TextTransformerEmbedder(KgeEmbedder):
         #    )
         #)[0, :]
 
-        return text_embeddings
+        text_embeddings = text_embeddings[0, :]
+
+        if self.training:
+            return text_embeddings, self_pred_loss_text_dropout + self_pred_loss_entity_dropout
+        else:
+            return text_embeddings
 
     def embed_all(self) -> Tensor:
         return self.embed(torch.arange(
@@ -349,22 +396,23 @@ class TextTransformerEmbedder(KgeEmbedder):
         name = "entity_ids_to_tokens"
 
         if not dataset._indexes.get(name):
-            entity_ids_to_strings = np.array(dataset.entity_strings())
+            if self.get_option("text_source") == "descriptions":
+                entity_ids_to_strings = dataset.entity_descriptions()
+            else:
+                entity_ids_to_strings = dataset.entity_strings()
+            entity_ids_to_strings = [x.replace("_", " ") if isinstance(x, str) else "[UNK]" for x in entity_ids_to_strings]
+            entity_ids_to_strings = np.array(entity_ids_to_strings)
             train_triples = dataset.load_triples("train")
-            train_entities = torch.cat((train_triples[:, 0], train_triples[:, 2])).unique()
-            strings_in_train = entity_ids_to_strings[train_entities]
-            train_entities = train_entities[~(strings_in_train == None)]
+            strings_in_train = entity_ids_to_strings[torch.cat((train_triples[:, 0], train_triples[:, 2])).unique()]
             strings_in_train = strings_in_train[~(strings_in_train == None)]
-
-            self.pretrain_text_entities = train_entities
 
             tokenizer = Tokenizer(BPE())
 
-            tokenizer.pre_tokenizer = CharDelimiterSplit("_")
+            tokenizer.pre_tokenizer = BertPreTokenizer()
 
             from tokenizers.trainers import BpeTrainer
 
-            trainer = BpeTrainer(special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"], **self.get_option("tokenization.trainer"))
+            trainer = BpeTrainer(special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"], **config.get(configuration_key).get("trainer"))
 
             tokenizer.train_from_iterator(strings_in_train, trainer=trainer)
 

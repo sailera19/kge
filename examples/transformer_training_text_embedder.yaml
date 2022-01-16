@@ -1,0 +1,93 @@
+job.type: train
+dataset.name: wnrr
+
+import: [transformer]
+model: reciprocal_relations_model
+reciprocal_relations_model.base_model:
+  type: transformer
+
+  self_pred_loss_weighing: by_count
+  s_dropout: 0.05
+  o_dropout: 0.05
+  s_dropout_masked: 1.0
+  o_dropout_masked: 1.0
+  s_dropout_replaced: 0.0
+  o_dropout_replaced: 0.0
+  s_text_dropout: 0.15
+  o_text_dropout: 0.15
+  s_text_dropout_masked: 1.0
+  o_text_dropout_masked: 1.0
+  s_text_dropout_replaced: 0.0
+  o_text_dropout_replaced: 0.0
+
+  tokenization:
+    trainer:
+      min_frequency: 2
+  enable_text: False
+  text_source: descriptions
+  entity_embedder:
+    type: text_transformer_embedder
+    text_source: descriptions
+    tokenization:
+      trainer:
+        min_frequency: 2
+    initialize: normal_
+    initialize_args:
+      std: 0.02
+    dim: 192
+    dropout: 0.6
+    encoder:
+      dropout: 0.6
+
+train:
+  optimizer: Adam
+  optimizer_args:
+    lr: 0.001
+  batch_size: 128
+  max_epochs: 500
+  loss: kl
+  type: 1vsBatch
+  lr_scheduler: ReduceLROnPlateau
+  lr_scheduler_args:
+    mode: max
+    patience: 2
+    factor: 0.5
+  lr_warmup: 50
+
+negative_sampling:
+  shared: True
+  with_replacement: False
+  implementation: batch
+  num_samples:
+    s: 128
+
+1vsBatch:
+  self_pred_loss:
+    factor_type: decreasing
+    factor: 0.2
+    max_epoch: 400
+    smoothing: 0
+
+transformer:
+  entity_embedder:
+    initialize: xavier_normal_
+    dim: 192
+    dropout: 0.6
+  relation_embedder:
+    initialize: xavier_normal_
+    dim: 192
+    dropout: 0.6
+  text_embedder:
+    initialize: xavier_normal_
+    dim: 192
+    dropout: 0.6
+
+valid:
+  early_stopping:
+    patience: 10
+  every: 5
+  metric: mean_reciprocal_rank_filtered_with_test
+
+#eval.batch_size: 1024
+eval.batch_size: 100000
+entity_ranking.chunk_size: 128

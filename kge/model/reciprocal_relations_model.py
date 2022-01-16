@@ -76,7 +76,31 @@ class ReciprocalRelationsModel(KgeModel):
             s_emb = self.get_s_embedder().embed(s)
         p_emb = self.get_p_embedder().embed(p + self.dataset.num_relations())
         o_emb = self.get_o_embedder().embed(o)
-        return self._scorer.score_emb(o_emb, p_emb, s_emb, combine="sp_", ground_truth_s=o, ground_truth_p=p + self.dataset.num_relations(), ground_truth_o=ground_truth, targets_o=s)
+
+        if isinstance(s_emb, tuple):
+            s_emb, s_emb_self_pred_loss = s_emb
+        else:
+            s_emb_self_pred_loss = 0
+        if isinstance(p_emb, tuple):
+            p_emb, p_emb_self_pred_loss = p_emb
+        else:
+            p_emb_self_pred_loss = 0
+        if isinstance(o_emb, tuple):
+            o_emb, o_emb_self_pred_loss = o_emb
+        else:
+            o_emb_self_pred_loss = 0
+
+        scores = self._scorer.score_emb(o_emb, p_emb, s_emb, combine="sp_", ground_truth_s=o, ground_truth_p=p + self.dataset.num_relations(), ground_truth_o=ground_truth, targets_o=s)
+
+        if isinstance(scores, tuple):
+            scores, scoring_self_pred_loss = scores
+        else:
+            scoring_self_pred_loss = 0
+        if (scoring_self_pred_loss + s_emb_self_pred_loss + p_emb_self_pred_loss + o_emb_self_pred_loss) > 0:
+            return scores, scoring_self_pred_loss + s_emb_self_pred_loss + p_emb_self_pred_loss + o_emb_self_pred_loss
+        else:
+            return scores
+
 
     def score_so(self, s, o, p=None, **kwargs):
         raise Exception("The reciprocal relations model cannot score relations.")

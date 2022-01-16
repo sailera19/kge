@@ -709,7 +709,30 @@ class KgeModel(KgeBase):
         else:
             o_emb = self.get_o_embedder().embed(o)
 
-        return self._scorer.score_emb(s_emb, p_emb, o_emb, combine="sp_", ground_truth_s=s, ground_truth_p=p, ground_truth_o=ground_truth, targets_o=o)
+        if isinstance(s_emb, tuple):
+            s_emb, s_emb_self_pred_loss = s_emb
+        else:
+            s_emb_self_pred_loss = 0
+        if isinstance(p_emb, tuple):
+            p_emb, p_emb_self_pred_loss = p_emb
+        else:
+            p_emb_self_pred_loss = 0
+        if isinstance(o_emb, tuple):
+            o_emb, o_emb_self_pred_loss = o_emb
+        else:
+            o_emb_self_pred_loss = 0
+
+
+        scores = self._scorer.score_emb(s_emb, p_emb, o_emb, combine="sp_", ground_truth_s=s, ground_truth_p=p, ground_truth_o=ground_truth, targets_o=o)
+
+        if isinstance(scores, tuple):
+            scores, scoring_self_pred_loss = scores
+        else:
+            scoring_self_pred_loss = 0
+        if (scoring_self_pred_loss + s_emb_self_pred_loss + p_emb_self_pred_loss + o_emb_self_pred_loss) > 0:
+            return scores, scoring_self_pred_loss + s_emb_self_pred_loss + p_emb_self_pred_loss + o_emb_self_pred_loss
+        else:
+            return scores
 
     def score_po(self, p: Tensor, o: Tensor, s: Tensor = None, ground_truth: Tensor = None, **kwargs) -> Tensor:
         r"""Compute scores for triples formed from a set of po-pairs and (or a subset of the) subjects.

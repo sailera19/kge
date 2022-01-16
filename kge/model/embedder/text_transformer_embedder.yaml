@@ -93,3 +93,13 @@ text_transformer_embedder:
   tokenization:
     trainer:
       +++: +++
+
+  text_source: entities
+
+  self_loss:
+    entity_dropout: 0.3
+    entity_dropout_masked: 0.5
+    entity_dropout_replaced: 0.2
+    text_dropout: 0.3
+    text_dropout_masked: 0.5
+    text_dropout_replaced: 0.2
