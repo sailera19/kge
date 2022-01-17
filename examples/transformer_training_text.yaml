@@ -1,12 +1,12 @@
 job.type: train
-dataset.name: wnrr
+dataset.name: fb15k-237
 
 import: [transformer]
 model: reciprocal_relations_model
 reciprocal_relations_model.base_model:
   type: transformer
 
-  self_pred_loss_weighing: by_count
+  self_pred_loss_weighing: equal
   s_dropout: 0.05
   o_dropout: 0.05
   s_dropout_masked: 1.0
@@ -40,6 +40,7 @@ reciprocal_relations_model.base_model:
     tokenization:
       trainer:
         min_frequency: 2
+        vocab_size: 100000
 
 train:
   optimizer: Adam

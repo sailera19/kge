@@ -184,8 +184,6 @@ class TransformerScorer(RelationalScorer):
                     torch.randint(low=0, high=self._text_embedder.vocab_size,
                                   size=(s_text_embeddings_replaced.sum(),), device=s_text_embeddings.device))
 
-            s_text_embeddings += self.text_pos_embeddings
-
             if not isinstance(o_emb, TextLookupEmbedding):
                 if combine == "spo":
                     targets_o = ground_truth_o
@@ -225,8 +223,6 @@ class TransformerScorer(RelationalScorer):
                     del s_masked, s_replaced, o_masked, o_replaced
                 del s_text_embeddings_masked, s_text_embeddings_replaced, o_text_embeddings_masked, o_text_embeddings_replaced
 
-            o_text_embeddings += self.text_pos_embeddings
-
             # transform the sp pairs
             out = self.encoder.forward(
                 torch.cat((
@@ -236,7 +232,7 @@ class TransformerScorer(RelationalScorer):
                                 self.cls_emb.repeat((1, batch_size, 1)),
                                 (s_emb + self.sub_type_emb.unsqueeze(0)).unsqueeze(0) if not self.text_only else None,
                                 (p_emb + self.rel_type_emb.unsqueeze(0)).unsqueeze(0),
-                                (s_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0)
+                                (s_text_embeddings + self.text_pos_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0)
                             )
                          if x is not None],
                         dim=0,
@@ -247,7 +243,7 @@ class TransformerScorer(RelationalScorer):
                                 self.o_cls_emb.repeat((1, num_o_embeddings, 1)),
                                 (o_emb + self.o_type_emb.unsqueeze(0)).unsqueeze(0) if not self.text_only else None,
                                 (self.any_rel_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_type_emb),
-                                (o_text_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0),
+                                (o_text_embeddings + self.text_pos_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0),
                             )
                          if x is not None],
                         dim=0,
@@ -312,7 +308,7 @@ class TransformerScorer(RelationalScorer):
 
         # all done
         if self.training and self.enable_text:
-            if self.self_pred_loss_weighing == "by_count" and False:
+            if self.self_pred_loss_weighing == "by_count":
                 self_pred_loss = (
                     self_pred_loss_dropout * (s_dropout.sum() + o_dropout.sum())
                     + self_pred_loss_text_dropout * (s_text_embeddings_dropout.sum() + o_text_embeddings_dropout.sum())
