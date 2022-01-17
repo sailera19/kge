@@ -34,6 +34,7 @@ transformer:
 
   enable_text: False
   text_only: False
+  built_in_text_embedder: False
   text_source: entities
   tokenization:
     trainer:

@@ -22,8 +22,9 @@ reciprocal_relations_model.base_model:
 
   enable_text: True
   text_only: True
+  built_in_text_embedder: False
 #  entity_embedder:
-#    type: text_transformer_embedder
+#    type: text_lookup_embedder
 #    tokenization:
 #      trainer:
 #        min_frequency: 5
@@ -34,7 +35,7 @@ reciprocal_relations_model.base_model:
 #    dropout: 0.6
 #    encoder:
 #      dropout: 0.6
-  text_embedder:
+  entity_embedder:
     text_source: descriptions
     tokenization:
       trainer:
@@ -71,6 +72,7 @@ negative_sampling:
 
 transformer:
   entity_embedder:
+    type: text_lookup_embedder
     initialize: xavier_normal_
     dim: 80
     dropout: 0.6
@@ -89,6 +91,6 @@ valid:
   every: 5
   metric: mean_reciprocal_rank_filtered_with_test
 
-#eval.batch_size: 1024
-eval.batch_size: 100000
+eval.batch_size: 1024
+# eval.batch_size: 100000
 entity_ranking.chunk_size: 128

@@ -340,6 +340,7 @@ class TrainingJob(TrainingOrEvaluationJob):
 
         # variables that record various statitics
         sum_loss = 0.0
+        sum_self_loss = 0.0
         sum_penalty = 0.0
         sum_penalties = defaultdict(lambda: 0.0)
         epoch_time = -time.time()
@@ -410,6 +411,7 @@ class TrainingJob(TrainingOrEvaluationJob):
                         "train.subbatch_size", self._max_subbatch_size, log=True
                     )
             sum_loss += batch_result.avg_loss * batch_result.size
+            sum_self_loss += batch_result.avg_loss_self * batch_result.size
 
             # determine penalty terms (forward pass)
             batch_forward_time = batch_result.forward_time - time.time()
@@ -540,6 +542,7 @@ class TrainingJob(TrainingOrEvaluationJob):
         self.current_trace["epoch"].update(
             dict(
                 avg_loss=sum_loss / self.num_examples,
+                avg_self_loss=sum_self_loss / self.num_examples,
                 avg_penalty=sum_penalty / len(self.loader),
                 avg_penalties={
                     k: p / len(self.loader) for k, p in sum_penalties.items()

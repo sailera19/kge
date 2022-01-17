@@ -8,7 +8,7 @@ from torch import Tensor
 import math
 
 from kge import Config, Dataset
-from kge.model.embedder.text_lookup_embedder import TextLookupEmbedding
+from kge.model.embedder.text_lookup_embedder import TextLookupEmbedding, TextLookupEmbedder
 from kge.model.kge_model import RelationalScorer, KgeModel, KgeEmbedder
 
 
@@ -39,10 +39,11 @@ class TransformerScorer(RelationalScorer):
 
         self.enable_text = self.get_option("enable_text")
         self.text_only = self.get_option("text_only")
+        self.built_in_text_embedder = self.get_option("built_in_text_embedder")
         self.self_pred_loss_weighing = self.get_option("self_pred_loss_weighing")
 
-        if self.enable_text:
-            self._text_embedder = KgeEmbedder.create(
+        if self.enable_text and self.built_in_text_embedder:
+            self._text_embedder: TextLookupEmbedder = KgeEmbedder.create(
                     config,
                     dataset,
                     self.configuration_key + ".text_embedder",
@@ -134,6 +135,10 @@ class TransformerScorer(RelationalScorer):
         self.s_embedder = s_embedder
         self.p_embedder = p_embedder
         self.o_embedder = o_embedder
+        if isinstance(self.s_embedder, TextLookupEmbedder):
+            self._text_embedder = s_embedder
+            self.text_pos_embeddings = torch.nn.Parameter(torch.zeros((self._text_embedder.max_token_length, self.emb_dim)))
+            self.initialize(self.text_pos_embeddings)
 
     def score_emb(self, s_emb, p_emb, o_emb, combine: str, ground_truth_s: Tensor, ground_truth_p: Tensor, ground_truth_o: Tensor, targets_o: Tensor=None, **kwargs):
         if combine not in ["sp_", "spo"]:
@@ -155,8 +160,6 @@ class TransformerScorer(RelationalScorer):
                 s_text_embeddings = s_emb
 
             s_tokens, s_attention_mask, s_text_embeddings = s_text_embeddings.tokens, s_text_embeddings.attention_mask, s_text_embeddings.embeddings
-
-            s_text_embeddings += self.text_pos_embeddings
 
             if self.training:
                 if not self.text_only:
@@ -181,6 +184,7 @@ class TransformerScorer(RelationalScorer):
                     torch.randint(low=0, high=self._text_embedder.vocab_size,
                                   size=(s_text_embeddings_replaced.sum(),), device=s_text_embeddings.device))
 
+            s_text_embeddings += self.text_pos_embeddings
 
             if not isinstance(o_emb, TextLookupEmbedding):
                 if combine == "spo":
@@ -196,8 +200,6 @@ class TransformerScorer(RelationalScorer):
 
             o_tokens, o_attention_mask, o_text_embeddings = o_text_embeddings.tokens, o_text_embeddings.attention_mask, o_text_embeddings.embeddings
             num_o_embeddings = len(o_tokens)
-
-            o_text_embeddings += self.text_pos_embeddings
 
             if self.training:
                 if not self.text_only:
@@ -215,9 +217,15 @@ class TransformerScorer(RelationalScorer):
                 o_text_embeddings_replaced = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool, device=o_text_embeddings.device).bernoulli_(
                     self.o_text_dropout_replaced) & o_text_embeddings_dropout & ~o_text_embeddings_masked
                 o_text_embeddings[o_text_embeddings_masked] = self.mlm_mask_emb
-                o_text_embeddings[o_text_embeddings_replaced] = self._text_embedder._embeddings(
+                o_text_embeddings[o_text_embeddings_replaced] = self._text_embedder.embed_tokens(
                     torch.randint(low=0, high=self._text_embedder.vocab_size,
                                   size=(o_text_embeddings_replaced.sum(),), device=o_text_embeddings.device))
+
+                if not self.text_only:
+                    del s_masked, s_replaced, o_masked, o_replaced
+                del s_text_embeddings_masked, s_text_embeddings_replaced, o_text_embeddings_masked, o_text_embeddings_replaced
+
+            o_text_embeddings += self.text_pos_embeddings
 
             # transform the sp pairs
             out = self.encoder.forward(
@@ -269,7 +277,7 @@ class TransformerScorer(RelationalScorer):
                     self_pred_loss_text_dropout = torch.nn.functional.cross_entropy(
                         torch.mm(out[3 - self.text_only:][torch.cat(
                             (s_text_embeddings_dropout.transpose(1, 0), o_text_embeddings_dropout.transpose(1, 0)),
-                            dim=1)], self._text_embedder._embeddings_all_tokens().transpose(1, 0)),
+                            dim=1)], self._text_embedder.embed_all_tokens().transpose(1, 0)),
                         torch.cat((s_tokens[s_text_embeddings_dropout].to(out.device),
                                    o_tokens[o_text_embeddings_dropout].to(out.device))),
                     )

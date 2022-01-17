@@ -15,11 +15,15 @@ from kge.misc import round_to_points
 
 from typing import List
 
+
 @dataclass
 class TextLookupEmbedding:
     embeddings: Tensor
     attention_mask: Tensor
     tokens: Tensor
+
+    def __len__(self):
+        return len(self.embeddings)
 
 
 class TextLookupEmbedder(KgeEmbedder):
@@ -124,7 +128,10 @@ class TextLookupEmbedder(KgeEmbedder):
                                    attention_mask.to(self._embeddings.weight.data.device),
                                    tokens.to(self._embeddings.weight.data.device))
 
-    def _embeddings_all_tokens(self) -> Tensor:
+    def embed_tokens(self, indexes: Tensor) -> TextLookupEmbedding:
+        return self._postprocess(self._embeddings(indexes.long()))
+
+    def embed_all_tokens(self) -> Tensor:
         return self._postprocess(self._embeddings(torch.arange(
                 self.vocab_size, dtype=torch.long, device=self._embeddings.weight.device
             )))
