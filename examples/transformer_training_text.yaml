@@ -20,11 +20,8 @@ reciprocal_relations_model.base_model:
   s_text_dropout_replaced: 0.0
   o_text_dropout_replaced: 0.0
 
-  tokenization:
-    trainer:
-      min_frequency: 2
   enable_text: True
-  text_source: descriptions
+  text_only: True
 #  entity_embedder:
 #    type: text_transformer_embedder
 #    tokenization:
@@ -37,6 +34,11 @@ reciprocal_relations_model.base_model:
 #    dropout: 0.6
 #    encoder:
 #      dropout: 0.6
+  text_embedder:
+    text_source: descriptions
+    tokenization:
+      trainer:
+        min_frequency: 2
 
 train:
   optimizer: Adam

@@ -1,4 +1,4 @@
-import: [lookup_embedder, text_transformer_embedder]
+import: [lookup_embedder, text_lookup_embedder]
 
 # Should only be used with reciprocal relations:
 # - model: reciprocal_relations_model
@@ -13,7 +13,7 @@ transformer:
     type: lookup_embedder
     +++: +++
   text_embedder:
-    type: lookup_embedder
+    type: text_lookup_embedder
     +++: +++
   encoder:
     # see torch.nn.TransformerEncodeLayer
@@ -33,6 +33,7 @@ transformer:
     +++: +++
 
   enable_text: False
+  text_only: False
   text_source: entities
   tokenization:
     trainer:
