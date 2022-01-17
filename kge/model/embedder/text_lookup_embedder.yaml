@@ -80,6 +80,9 @@ text_lookup_embedder:
   round_dim_to: []
 
   tokenization:
+    max_word_count: 0
+    max_sentence_count: 0
+    remove_partial_sentences: False
     trainer:
       +++: +++
 

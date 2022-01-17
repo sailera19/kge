@@ -38,6 +38,9 @@ reciprocal_relations_model.base_model:
   entity_embedder:
     text_source: descriptions
     tokenization:
+      max_sentence_count: 0
+      max_word_count: 40
+      remove_partial_sentences: True
       trainer:
         min_frequency: 2
         vocab_size: 100000

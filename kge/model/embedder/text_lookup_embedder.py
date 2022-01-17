@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 import numpy as np
+import regex
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import CharDelimiterSplit, BertPreTokenizer
@@ -15,6 +16,7 @@ from kge.misc import round_to_points
 
 from typing import List
 
+SENTENCE_SPLIT_REGEX = "(?<!\\d)\.(?<!\\d)"
 
 @dataclass
 class TextLookupEmbedding:
@@ -202,6 +204,15 @@ class TextLookupEmbedder(KgeEmbedder):
                 entity_ids_to_strings = dataset.entity_strings()
             entity_ids_to_strings = [x.replace("_", " ") if isinstance(x, str) else "[UNK]" for x in
                                      entity_ids_to_strings]
+            max_sentence_count = config.get(configuration_key).get("max_sentence_count", 0)
+            if max_sentence_count > 0:
+                entity_ids_to_strings = [". ".join(regex.split(SENTENCE_SPLIT_REGEX, x)[:max_sentence_count]) + "." for x in entity_ids_to_strings]
+            max_word_count = config.get(configuration_key).get("max_word_count", 0)
+            if max_word_count > 0:
+                entity_ids_to_strings = [" ".join(x.split(" ")[:max_word_count]) for x in entity_ids_to_strings]
+            remove_partial_sentences = config.get(configuration_key).get("remove_partial_sentences", False)
+            if remove_partial_sentences:
+                entity_ids_to_strings = [". ".join(regex.split(SENTENCE_SPLIT_REGEX, x)[:-1]) + "." if len(regex.split(SENTENCE_SPLIT_REGEX, x)) > 1 else x for x in entity_ids_to_strings]
             entity_ids_to_strings = np.array(entity_ids_to_strings)
             train_triples = dataset.load_triples("train")
             strings_in_train = entity_ids_to_strings[torch.cat((train_triples[:, 0], train_triples[:, 2])).unique()]
