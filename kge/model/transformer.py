@@ -38,18 +38,32 @@ class TransformerScorer(RelationalScorer):
         self.o_embedder: KgeEmbedder = None
 
         self.enable_text = self.get_option("enable_text")
-        self.text_only = self.get_option("text_only")
-        self.built_in_text_embedder = self.get_option("built_in_text_embedder")
+        self.enable_entity_text = self.get_option("enable_entity_text")
+        self.enable_entity_structure = self.get_option("enable_entity_structure")
+        self.entity_built_in_text_embedder = self.get_option("entity_built_in_text_embedder")
+        self.enable_relation_text = self.get_option("enable_relation_text")
+        self.enable_relation_structure = self.get_option("enable_relation_structure")
+        self.relation_built_in_text_embedder = self.get_option("relation_built_in_text_embedder")
         self.self_pred_loss_weighing = self.get_option("self_pred_loss_weighing")
 
-        if self.enable_text and self.built_in_text_embedder:
-            self._text_embedder: TextLookupEmbedder = KgeEmbedder.create(
-                    config,
-                    dataset,
-                    self.configuration_key + ".text_embedder",
-                    dataset.num_entities())
-            self.text_pos_embeddings = torch.nn.Parameter(torch.zeros((self._text_embedder.max_token_length, self.emb_dim)))
-            self.initialize(self.text_pos_embeddings)
+        if self.enable_text:
+            if self.entity_built_in_text_embedder:
+                self._text_embedder: TextLookupEmbedder = KgeEmbedder.create(
+                        config,
+                        dataset,
+                        self.configuration_key + ".text_embedder",
+                        dataset.num_entities())
+                self.text_pos_embeddings = torch.nn.Parameter(torch.zeros((self._text_embedder.max_token_length, self.emb_dim)))
+                self.initialize(self.text_pos_embeddings)
+
+            if self.relation_built_in_text_embedder:
+                self._relation_text_embedder: TextLookupEmbedder = KgeEmbedder.create(
+                        config,
+                        dataset,
+                        self.configuration_key + ".relation_text_embedder",
+                        dataset.num_relations())
+                self.rel_text_pos_embeddings = torch.nn.Parameter(torch.zeros((self._relation_text_embedder.max_token_length, self.emb_dim)))
+                self.initialize(self.rel_text_pos_embeddings)
 
         # the CLS embedding
         self.cls_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
@@ -65,8 +79,12 @@ class TransformerScorer(RelationalScorer):
         self.initialize(self.sub_text_type_emb)
         self.obj_text_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.obj_text_type_emb)
+        self.rel_text_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.rel_text_type_emb)
         self.any_rel_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
-        self.initialize(self.any_rel_type_emb)
+        self.initialize(self.rel_text_type_emb)
+        self.any_rel_text_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.any_rel_text_type_emb)
         self.o_cls_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.o_cls_emb)
         self.o_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
@@ -74,6 +92,8 @@ class TransformerScorer(RelationalScorer):
 
         # masks
         self.s_mask = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.s_mask)
+        self.p_mask = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.s_mask)
         self.o_mask = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.o_mask)
@@ -83,17 +103,23 @@ class TransformerScorer(RelationalScorer):
 
         self.s_dropout = self.get_option("s_dropout")
         self.o_dropout = self.get_option("o_dropout")
+        self.p_dropout = self.get_option("p_dropout")
         self.s_dropout_masked = self.get_option("s_dropout_masked")
         self.o_dropout_masked = self.get_option("o_dropout_masked")
+        self.p_dropout_masked = self.get_option("p_dropout_masked")
         self.s_dropout_replaced = self.get_option("s_dropout_replaced")
         self.o_dropout_replaced = self.get_option("o_dropout_replaced")
+        self.p_dropout_replaced = self.get_option("p_dropout_replaced")
 
         self.s_text_dropout = self.get_option("s_text_dropout")
         self.o_text_dropout = self.get_option("o_text_dropout")
+        self.p_text_dropout = self.get_option("p_text_dropout")
         self.s_text_dropout_masked = self.get_option("s_text_dropout_masked")
         self.o_text_dropout_masked = self.get_option("o_text_dropout_masked")
+        self.p_text_dropout_masked = self.get_option("p_text_dropout_masked")
         self.s_text_dropout_replaced = self.get_option("s_text_dropout_replaced")
         self.o_text_dropout_replaced = self.get_option("o_text_dropout_replaced")
+        self.p_text_dropout_replaced = self.get_option("p_text_dropout_replaced")
 
         self.feedforward_dim = self.get_option("encoder.dim_feedforward")
         if not self.feedforward_dim:
@@ -135,10 +161,15 @@ class TransformerScorer(RelationalScorer):
         self.s_embedder = s_embedder
         self.p_embedder = p_embedder
         self.o_embedder = o_embedder
-        if isinstance(self.s_embedder, TextLookupEmbedder):
+        if isinstance(s_embedder, TextLookupEmbedder):
             self._text_embedder = s_embedder
             self.text_pos_embeddings = torch.nn.Parameter(torch.zeros((self._text_embedder.max_token_length, self.emb_dim)))
             self.initialize(self.text_pos_embeddings)
+        if isinstance(p_embedder, TextLookupEmbedder):
+            self._relation_text_embedder = p_embedder
+            self.rel_text_pos_embeddings = torch.nn.Parameter(
+                torch.zeros((self._relation_text_embedder.max_token_length, self.emb_dim)))
+            self.initialize(self.rel_text_pos_embeddings)
 
     def score_emb(self, s_emb, p_emb, o_emb, combine: str, ground_truth_s: Tensor, ground_truth_p: Tensor, ground_truth_o: Tensor, targets_o: Tensor=None, **kwargs):
         if combine not in ["sp_", "spo"]:
@@ -151,9 +182,10 @@ class TransformerScorer(RelationalScorer):
         batch_size = len(s_emb)
 
         self_pred_loss_dropout, self_pred_loss_text_dropout = 0, 0
+        self_pred_loss_p_dropout, self_pred_loss_p_text_dropout = 0, 0
 
         if self.enable_text:
-            if not isinstance(s_emb, TextLookupEmbedding):
+            if not isinstance(s_emb, TextLookupEmbedding) and self.enable_entity_text:
                 s_text_embeddings = self._text_embedder.embed(ground_truth_s)
 
             else:
@@ -162,12 +194,13 @@ class TransformerScorer(RelationalScorer):
             s_tokens, s_attention_mask, s_text_embeddings = s_text_embeddings.tokens, s_text_embeddings.attention_mask, s_text_embeddings.embeddings
 
             if self.training:
-                if not self.text_only:
+                if self.enable_entity_structure:
                     s_dropout = torch.zeros(len(s_emb), dtype=torch.bool).bernoulli_(self.s_dropout)
                     s_masked = torch.zeros(len(s_emb), dtype=torch.bool).bernoulli_(self.s_dropout_masked) & s_dropout
                     s_replaced = torch.zeros(len(s_emb), dtype=torch.bool).bernoulli_(self.s_dropout_replaced) & s_dropout & ~s_masked
                     s_emb[s_masked] = self.s_mask
                     s_emb[s_replaced] = self.s_embedder.embed(torch.randint(low=0, high=self.dataset.num_entities(), size=(s_replaced.sum(),), device=s_emb.device))
+                    del s_masked, s_replaced
                 else:
                     s_dropout = torch.zeros(1)
                 s_text_embeddings_dropout = torch.zeros(s_text_embeddings.shape[:2], dtype=torch.bool,
@@ -183,8 +216,9 @@ class TransformerScorer(RelationalScorer):
                 s_text_embeddings[s_text_embeddings_replaced] = self._text_embedder._embeddings(
                     torch.randint(low=0, high=self._text_embedder.vocab_size,
                                   size=(s_text_embeddings_replaced.sum(),), device=s_text_embeddings.device))
+                del s_text_embeddings_masked, s_text_embeddings_replaced
 
-            if not isinstance(o_emb, TextLookupEmbedding):
+            if not isinstance(o_emb, TextLookupEmbedding) and self.enable_entity_text:
                 if combine == "spo":
                     targets_o = ground_truth_o
                     o_text_embeddings = self._text_embedder.embed(targets_o)
@@ -200,82 +234,148 @@ class TransformerScorer(RelationalScorer):
             num_o_embeddings = len(o_tokens)
 
             if self.training:
-                if not self.text_only:
+                if self.enable_entity_structure:
                     o_dropout = torch.zeros(len(o_emb), dtype=torch.bool).bernoulli_(self.o_dropout)
                     o_masked = torch.zeros(len(o_emb), dtype=torch.bool).bernoulli_(self.o_dropout_masked) & o_dropout
                     o_replaced = torch.zeros(len(o_emb), dtype=torch.bool).bernoulli_(self.o_dropout_replaced) & o_dropout & ~o_masked
                     o_emb[o_masked] = self.o_mask
                     o_emb[o_replaced] = self.o_embedder.embed(torch.randint(low=0, high=self.dataset.num_entities(), size=(o_replaced.sum(),), device=o_emb.device))
+                    del o_masked, o_replaced
                 else:
                     o_dropout = torch.zeros(1)
-                o_text_embeddings_dropout = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool, device=o_text_embeddings.device).bernoulli_(
-                    self.o_text_dropout) & o_attention_mask
-                o_text_embeddings_masked = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool, device=o_text_embeddings.device).bernoulli_(
-                    self.o_text_dropout_masked) & o_text_embeddings_dropout
-                o_text_embeddings_replaced = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool, device=o_text_embeddings.device).bernoulli_(
-                    self.o_text_dropout_replaced) & o_text_embeddings_dropout & ~o_text_embeddings_masked
-                o_text_embeddings[o_text_embeddings_masked] = self.mlm_mask_emb
-                o_text_embeddings[o_text_embeddings_replaced] = self._text_embedder.embed_tokens(
-                    torch.randint(low=0, high=self._text_embedder.vocab_size,
-                                  size=(o_text_embeddings_replaced.sum(),), device=o_text_embeddings.device))
 
-                if not self.text_only:
-                    del s_masked, s_replaced, o_masked, o_replaced
-                del s_text_embeddings_masked, s_text_embeddings_replaced, o_text_embeddings_masked, o_text_embeddings_replaced
+                if self.enable_entity_text:
+                    o_text_embeddings_dropout = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool, device=o_text_embeddings.device).bernoulli_(
+                        self.o_text_dropout) & o_attention_mask
+                    o_text_embeddings_masked = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool, device=o_text_embeddings.device).bernoulli_(
+                        self.o_text_dropout_masked) & o_text_embeddings_dropout
+                    o_text_embeddings_replaced = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool, device=o_text_embeddings.device).bernoulli_(
+                        self.o_text_dropout_replaced) & o_text_embeddings_dropout & ~o_text_embeddings_masked
+                    o_text_embeddings[o_text_embeddings_masked] = self.mlm_mask_emb
+                    o_text_embeddings[o_text_embeddings_replaced] = self._text_embedder.embed_tokens(
+                        torch.randint(low=0, high=self._text_embedder.vocab_size,
+                                      size=(o_text_embeddings_replaced.sum(),), device=o_text_embeddings.device))
+                    del o_text_embeddings_masked, o_text_embeddings_replaced
+
+            if self.enable_relation_text:
+                if not isinstance(p_emb, TextLookupEmbedding):
+                    p_text_embeddings = self._relation_text_embedder.embed(ground_truth_p)
+                else:
+                    p_text_embeddings = p_emb
+
+                p_tokens, p_attention_mask, p_text_embeddings = p_text_embeddings.tokens, p_text_embeddings.attention_mask, p_text_embeddings.embeddings
+
+            if self.training:
+                if self.enable_relation_structure:
+                    p_dropout = torch.zeros(len(p_emb), dtype=torch.bool).bernoulli_(self.p_dropout)
+                    p_masked = torch.zeros(len(p_emb), dtype=torch.bool).bernoulli_(self.p_dropout_masked) & p_dropout
+                    p_replaced = torch.zeros(len(p_emb), dtype=torch.bool).bernoulli_(self.p_dropout_replaced) & p_dropout & ~p_masked
+                    p_emb[p_masked] = self.p_mask
+                    p_emb[p_replaced] = self.p_embedder.embed(torch.randint(low=0, high=self.dataset.num_relations(), size=(p_replaced.sum(),), device=p_emb.device))
+                else:
+                    p_dropout = torch.zeros(1)
+
+                if self.enable_relation_text:
+                    p_text_embeddings_dropout = torch.zeros(p_text_embeddings.shape[:2], dtype=torch.bool,
+                                                            device=p_text_embeddings.device).bernoulli_(
+                        self.p_text_dropout) & p_attention_mask
+                    p_text_embeddings_masked = torch.zeros(p_text_embeddings.shape[:2], dtype=torch.bool,
+                                                           device=p_text_embeddings.device).bernoulli_(
+                        self.p_text_dropout_masked) & p_text_embeddings_dropout
+                    p_text_embeddings_replaced = torch.zeros(p_text_embeddings.shape[:2], dtype=torch.bool,
+                                                             device=p_text_embeddings.device).bernoulli_(
+                        self.p_text_dropout_replaced) & p_text_embeddings_dropout & ~p_text_embeddings_masked
+                    p_text_embeddings[p_text_embeddings_masked] = self.mlm_mask_emb
+                    p_text_embeddings[p_text_embeddings_replaced] = self._relation_text_embedder._embeddings(
+                        torch.randint(low=0, high=self._relation_text_embedder.vocab_size,
+                                      size=(p_text_embeddings_replaced.sum(),), device=p_text_embeddings.device))
+
+            offset = 1 + self.enable_entity_structure + self.enable_relation_structure
 
             # transform the sp pairs
             out = self.encoder.forward(
                 torch.cat((
                     torch.cat(
                         [x for x in
-                            (
-                                self.cls_emb.repeat((1, batch_size, 1)),
-                                (s_emb + self.sub_type_emb.unsqueeze(0)).unsqueeze(0) if not self.text_only else None,
-                                (p_emb + self.rel_type_emb.unsqueeze(0)).unsqueeze(0),
-                                (s_text_embeddings + self.text_pos_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0)
-                            )
+                         (
+                             self.cls_emb.repeat((1, batch_size, 1)),
+                             (s_emb + self.sub_type_emb.unsqueeze(0)).unsqueeze(
+                                 0) if self.enable_entity_structure else None,
+                             (p_emb + self.rel_type_emb.unsqueeze(0)).unsqueeze(
+                                 0) if self.enable_relation_structure else None,
+                             (s_text_embeddings + self.text_pos_embeddings + self.sub_text_type_emb.unsqueeze(
+                                 0)).transpose(1, 0) if self.enable_entity_text else None,
+                             (p_text_embeddings + self.rel_text_pos_embeddings + self.rel_text_type_emb.unsqueeze(
+                                 0)).transpose(1, 0) if self.enable_relation_text else None,
+                         )
                          if x is not None],
                         dim=0,
                     ),
                     torch.cat(
                         [x for x in
-                            (
-                                self.o_cls_emb.repeat((1, num_o_embeddings, 1)),
-                                (o_emb + self.o_type_emb.unsqueeze(0)).unsqueeze(0) if not self.text_only else None,
-                                (self.any_rel_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_type_emb),
-                                (o_text_embeddings + self.text_pos_embeddings + self.sub_text_type_emb.unsqueeze(0)).transpose(1, 0),
-                            )
+                         (
+                             self.o_cls_emb.repeat((1, num_o_embeddings, 1)),
+                             (o_emb + self.o_type_emb.unsqueeze(0)).unsqueeze(0)
+                             if self.enable_entity_structure else None,
+                             (self.any_rel_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_type_emb)
+                             if self.enable_relation_structure else None,
+                             (o_text_embeddings + self.text_pos_embeddings + self.sub_text_type_emb.unsqueeze(0))
+                                 .transpose(1, 0)
+                             if self.enable_entity_text else None,
+                             (self.any_rel_text_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_text_type_emb)
+                             if self.enable_relation_text else None,
+                             torch.zeros(p_attention_mask.shape[1] - 1, num_o_embeddings, self.emb_dim,
+                                         device=o_text_embeddings.device)
+                             if self.enable_relation_text else None
+                         )
                          if x is not None],
                         dim=0,
                     )
                 ), dim=1),
                 src_key_padding_mask=torch.cat((
-                    ~torch.cat((
-                        torch.ones(batch_size, 3 - self.text_only, dtype=torch.bool, device=ground_truth_s.device),
-                        s_attention_mask.to(ground_truth_s.device)
-                    ), dim=1),
-                    ~torch.cat((
-                        torch.ones(num_o_embeddings, 3 - self.text_only, dtype=torch.bool,
-                                   device=ground_truth_o.device),
-                        o_attention_mask
-                    ), dim=1)
+                    ~torch.cat([x for x in (
+                        torch.ones(batch_size, offset, dtype=torch.bool, device=ground_truth_s.device),
+                        s_attention_mask.to(ground_truth_s.device) if self.enable_entity_text else None,
+                        p_attention_mask.to(ground_truth_s.device) if self.enable_relation_text else None,
+                    ) if x is not None], dim=1),
+                    ~torch.cat([x for x in (
+                        torch.ones(num_o_embeddings, offset,
+                                   dtype=torch.bool, device=ground_truth_o.device),
+                        o_attention_mask if self.enable_entity_text else None,
+                        torch.ones(num_o_embeddings, self.enable_relation_text, dtype=torch.bool, device=ground_truth_o.device)
+                        if self.enable_relation_text else None,
+                        torch.zeros(num_o_embeddings, p_attention_mask.shape[1] - 1, dtype=torch.bool, device=ground_truth_o.device)
+                        if self.enable_relation_text else None,
+                    ) if x is not None], dim=1)
                 ), dim=0)
             )  # SxNxE = 3 x batch_size x emb_size
 
 
             if self.training:
-                if not self.text_only and (s_dropout.any() or o_dropout.any()):
+                if self.enable_entity_structure and (s_dropout.any() or o_dropout.any()):
                     self_pred_loss_dropout = torch.nn.functional.cross_entropy(
                         torch.mm(out[1][torch.cat((s_dropout, o_dropout))], self.s_embedder.embed_all().transpose(1, 0)),
                         torch.cat((ground_truth_s[s_dropout], targets_o[o_dropout])),
                     )
-                if s_text_embeddings_dropout.any() or o_text_embeddings_dropout.any():
+                if self.enable_entity_text and (s_text_embeddings_dropout.any() or o_text_embeddings_dropout.any()):
                     self_pred_loss_text_dropout = torch.nn.functional.cross_entropy(
-                        torch.mm(out[3 - self.text_only:][torch.cat(
+                        torch.mm(out[offset:offset + s_attention_mask.shape[1]][torch.cat(
                             (s_text_embeddings_dropout.transpose(1, 0), o_text_embeddings_dropout.transpose(1, 0)),
                             dim=1)], self._text_embedder.embed_all_tokens().transpose(1, 0)),
                         torch.cat((s_tokens[s_text_embeddings_dropout].to(out.device),
                                    o_tokens[o_text_embeddings_dropout].to(out.device))),
+                    )
+
+                if self.enable_relation_structure and p_dropout.any():
+                    self_pred_loss_p_dropout = torch.nn.functional.cross_entropy(
+                        torch.mm(out[1 + self.enable_entity_structure][:, :batch_size][p_dropout],
+                                 self.p_embedder.embed_all().transpose(1, 0)),
+                        torch.cat(ground_truth_p[p_dropout]),
+                    )
+                if self.enable_relation_text and p_text_embeddings_dropout.any():
+                    self_pred_loss_p_text_dropout = torch.nn.functional.cross_entropy(
+                        torch.mm(out[offset + s_attention_mask.shape[1]:][:, :batch_size][p_text_embeddings_dropout.transpose(1, 0)], self._relation_text_embedder.embed_all_tokens().transpose(1, 0)),
+                        p_tokens[p_text_embeddings_dropout].to(out.device)
                     )
 
             o_emb = out[:, batch_size:]
@@ -312,15 +412,26 @@ class TransformerScorer(RelationalScorer):
                 self_pred_loss = (
                     self_pred_loss_dropout * (s_dropout.sum() + o_dropout.sum())
                     + self_pred_loss_text_dropout * (s_text_embeddings_dropout.sum() + o_text_embeddings_dropout.sum())
+                    + self_pred_loss_p_dropout * p_dropout.sum()
+                    + self_pred_loss_p_text_dropout * p_text_embeddings_dropout.sum()
                                  ) / (
                     s_dropout.sum()
                     + o_dropout.sum()
                     + s_text_embeddings_dropout.sum()
                     + o_text_embeddings_dropout.sum()
+                    + p_dropout.sum()
+                    + p_text_embeddings_dropout.sum()
                 )
             else:
-                self_pred_loss = (self_pred_loss_dropout + self_pred_loss_text_dropout) / (
-                        (self_pred_loss_dropout > 0) + (self_pred_loss_text_dropout > 0))
+                self_pred_loss = (
+                     self_pred_loss_dropout
+                     + self_pred_loss_text_dropout
+                     + self_pred_loss_p_dropout
+                     + self_pred_loss_p_text_dropout) / (
+                     (self_pred_loss_dropout > 0)
+                     + (self_pred_loss_text_dropout > 0)
+                     + (self_pred_loss_p_dropout > 0)
+                     + (self_pred_loss_p_text_dropout > 0))
 
             return out.view(batch_size, -1), self_pred_loss
         else:

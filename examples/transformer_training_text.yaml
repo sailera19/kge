@@ -1,5 +1,5 @@
 job.type: train
-dataset.name: fb15k-237
+dataset.name: wnrr
 
 import: [transformer]
 model: reciprocal_relations_model
@@ -9,20 +9,30 @@ reciprocal_relations_model.base_model:
   self_pred_loss_weighing: equal
   s_dropout: 0.05
   o_dropout: 0.05
+  p_dropout: 0.
   s_dropout_masked: 1.0
   o_dropout_masked: 1.0
+  p_dropout_masked: 1.0
   s_dropout_replaced: 0.0
   o_dropout_replaced: 0.0
+  p_dropout_replaced: 0.0
   s_text_dropout: 0.15
   o_text_dropout: 0.15
+  p_text_dropout: 0.0
   s_text_dropout_masked: 1.0
   o_text_dropout_masked: 1.0
+  p_text_dropout_masked: 1.0
   s_text_dropout_replaced: 0.0
   o_text_dropout_replaced: 0.0
+  p_text_dropout_replaced: 0.0
 
   enable_text: True
-  text_only: True
-  built_in_text_embedder: False
+  enable_entity_structure: False
+  enable_entity_text: True
+  enable_relation_structure: True
+  enable_relation_text: False
+  entity_built_in_text_embedder: False
+  relation_built_in_text_embedder: False
 #  entity_embedder:
 #    type: text_lookup_embedder
 #    tokenization:
@@ -38,12 +48,38 @@ reciprocal_relations_model.base_model:
   entity_embedder:
     text_source: descriptions
     tokenization:
-      max_sentence_count: 0
-      max_word_count: 40
-      remove_partial_sentences: True
+      #max_sentence_count: 0
+      #max_word_count: 40
+      #remove_partial_sentences: True
       trainer:
         min_frequency: 2
         vocab_size: 100000
+#  relation_embedder:
+#    text_source: relations
+#    tokenization:
+#      trainer:
+#        min_frequency: 2
+#        vocab_size: 100000
+#  relation_text_embedder:
+#    initialize: xavier_normal_
+#    dim: 80
+#    dropout: 0.6
+#    text_source: relations
+#    tokenization:
+#      trainer:
+#        min_frequency: 2
+#        vocab_size: 100000
+#  text_embedder:
+#    initialize: xavier_normal_
+#    dim: 80
+#    dropout: 0.6
+#    text_source: descriptions
+#    tokenization:
+#      trainer:
+#        min_frequency: 2
+#        vocab_size: 100000
+
+
 
 train:
   optimizer: Adam
@@ -81,6 +117,7 @@ transformer:
     dim: 80
     dropout: 0.6
   relation_embedder:
+    type: lookup_embedder
     initialize: xavier_normal_
     dim: 80
     dropout: 0.6

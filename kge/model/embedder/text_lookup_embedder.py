@@ -109,7 +109,7 @@ class TextLookupEmbedder(KgeEmbedder):
         )
 
     def embed(self, indexes: Tensor) -> TextLookupEmbedding:
-        tokens, attention_mask, _ = self.dataset.index("entity_ids_to_tokens")
+        tokens, attention_mask, _ = self.dataset.index(self.index_name)
         return TextLookupEmbedding(self._postprocess(self._embeddings(tokens.to(indexes.device)[indexes.long()])),
                                    attention_mask.to(indexes.device)[indexes.long()], tokens[
                                        indexes.long()])
@@ -124,7 +124,7 @@ class TextLookupEmbedder(KgeEmbedder):
         return embeddings
 
     def _embeddings_all(self) -> TextLookupEmbedding:
-        tokens, attention_mask, _ = self.dataset.index("entity_ids_to_tokens")
+        tokens, attention_mask, _ = self.dataset.index(self.index_name)
         all_entities = torch.arange(self.lookup_vocab_size, dtype=torch.long, device=self._embeddings.weight.device)
         return TextLookupEmbedding(self._embeddings(all_entities),
                                    attention_mask.to(self._embeddings.weight.data.device),
@@ -139,8 +139,14 @@ class TextLookupEmbedder(KgeEmbedder):
             )))
 
     @property
+    def index_name(self):
+        if "relation_embedder" in self.configuration_key or "relation_text_embedder" in self.configuration_key:
+            return "relation_ids_to_tokens"
+        else:
+            return "entity_ids_to_tokens"
+    @property
     def max_token_length(self):
-        tokens, _, _ = self.dataset.index("entity_ids_to_tokens")
+        tokens, _, _ = self.dataset.index(self.index_name)
         return tokens.shape[1]
 
     def _get_regularize_weight(self) -> Tensor:
@@ -195,27 +201,41 @@ class TextLookupEmbedder(KgeEmbedder):
         return result
 
     def generate_token_mapping(self, dataset, config, configuration_key):
-        name = "entity_ids_to_tokens"
+        name = self.index_name
 
         if not dataset._indexes.get(name):
-            if self.get_option("text_source") == "descriptions":
-                entity_ids_to_strings = dataset.entity_descriptions()
+            unknown_token = "[UNK]"
+            special_tokens = [unknown_token]
+
+            if name == "relation_ids_to_tokens":
+                ids_to_strings = dataset.relation_strings()
+                # add inverse for reciprocals:
+                if dataset.num_relations() == len(ids_to_strings) * 2:
+                    inverse_token = "[INV]"
+                    special_tokens.append(inverse_token)
+                    ids_to_strings = [*ids_to_strings, *[inverse_token + " " + x for x in ids_to_strings]]
             else:
-                entity_ids_to_strings = dataset.entity_strings()
-            entity_ids_to_strings = [x.replace("_", " ") if isinstance(x, str) else "[UNK]" for x in
-                                     entity_ids_to_strings]
+                if self.get_option("text_source") == "descriptions":
+                    ids_to_strings = dataset.entity_descriptions()
+                else:
+                    ids_to_strings = dataset.entity_strings()
+            ids_to_strings = [x.replace("_", " ") if isinstance(x, str) else "[UNK]" for x in
+                                     ids_to_strings]
             max_sentence_count = config.get(configuration_key).get("max_sentence_count", 0)
             if max_sentence_count > 0:
-                entity_ids_to_strings = [". ".join(regex.split(SENTENCE_SPLIT_REGEX, x)[:max_sentence_count]) + "." for x in entity_ids_to_strings]
+                ids_to_strings = [". ".join(regex.split(SENTENCE_SPLIT_REGEX, x)[:max_sentence_count]) + "." for x in ids_to_strings]
             max_word_count = config.get(configuration_key).get("max_word_count", 0)
             if max_word_count > 0:
-                entity_ids_to_strings = [" ".join(x.split(" ")[:max_word_count]) for x in entity_ids_to_strings]
+                ids_to_strings = [" ".join(x.split(" ")[:max_word_count]) for x in ids_to_strings]
             remove_partial_sentences = config.get(configuration_key).get("remove_partial_sentences", False)
             if remove_partial_sentences:
-                entity_ids_to_strings = [". ".join(regex.split(SENTENCE_SPLIT_REGEX, x)[:-1]) + "." if len(regex.split(SENTENCE_SPLIT_REGEX, x)) > 1 else x for x in entity_ids_to_strings]
-            entity_ids_to_strings = np.array(entity_ids_to_strings)
+                ids_to_strings = [". ".join(regex.split(SENTENCE_SPLIT_REGEX, x)[:-1]) + "." if len(regex.split(SENTENCE_SPLIT_REGEX, x)) > 1 else x for x in ids_to_strings]
+            ids_to_strings = np.array(ids_to_strings)
             train_triples = dataset.load_triples("train")
-            strings_in_train = entity_ids_to_strings[torch.cat((train_triples[:, 0], train_triples[:, 2])).unique()]
+            if name == "relation_ids_to_tokens":
+                strings_in_train = ids_to_strings[train_triples[:, 1].unique()]
+            else:
+                strings_in_train = ids_to_strings[torch.cat((train_triples[:, 0], train_triples[:, 2])).unique()]
             strings_in_train = strings_in_train[~(strings_in_train == None)]
 
             tokenizer = Tokenizer(BPE())
@@ -231,7 +251,7 @@ class TextLookupEmbedder(KgeEmbedder):
 
             tokenizer.enable_padding()
 
-            output = tokenizer.encode_batch([x if x else "" for x in entity_ids_to_strings])
+            output = tokenizer.encode_batch([x if x else "" for x in ids_to_strings])
 
             entity_ids_to_tokens = torch.tensor([x.ids for x in output], dtype=torch.int64)
 
