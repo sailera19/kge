@@ -1,4 +1,4 @@
-import: [lookup_embedder, text_lookup_embedder]
+import: [lookup_embedder, text_lookup_embedder, shared_text_lookup_embedder]
 
 # Should only be used with reciprocal relations:
 # - model: reciprocal_relations_model

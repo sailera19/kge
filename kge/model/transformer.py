@@ -8,6 +8,7 @@ from torch import Tensor
 import math
 
 from kge import Config, Dataset
+from kge.model import SharedTextLookupEmbedder
 from kge.model.embedder.text_lookup_embedder import TextLookupEmbedding, TextLookupEmbedder
 from kge.model.kge_model import RelationalScorer, KgeModel, KgeEmbedder
 
@@ -90,6 +91,9 @@ class TransformerScorer(RelationalScorer):
         self.o_type_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.o_type_emb)
 
+        self.seperator_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.seperator_emb)
+
         # masks
         self.s_mask = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.s_mask)
@@ -161,14 +165,16 @@ class TransformerScorer(RelationalScorer):
         self.s_embedder = s_embedder
         self.p_embedder = p_embedder
         self.o_embedder = o_embedder
-        if isinstance(s_embedder, TextLookupEmbedder):
-            self._text_embedder = s_embedder
-            self.text_pos_embeddings = torch.nn.Parameter(torch.zeros((self._text_embedder.max_token_length, self.emb_dim)))
+
+    def _initialize_text_embedders(self):
+        if isinstance(self.s_embedder, TextLookupEmbedder):
+            self._text_embedder = self.s_embedder
+            self.text_pos_embeddings = torch.nn.Parameter(torch.zeros((self._text_embedder.max_token_length, self.emb_dim), device=self.s_embedder.device))
             self.initialize(self.text_pos_embeddings)
-        if isinstance(p_embedder, TextLookupEmbedder):
-            self._relation_text_embedder = p_embedder
+        if isinstance(self.p_embedder, TextLookupEmbedder) or isinstance(self.p_embedder, SharedTextLookupEmbedder):
+            self._relation_text_embedder = self.p_embedder
             self.rel_text_pos_embeddings = torch.nn.Parameter(
-                torch.zeros((self._relation_text_embedder.max_token_length, self.emb_dim)))
+                torch.zeros((self._relation_text_embedder.max_token_length, self.emb_dim), device=self.p_embedder.device))
             self.initialize(self.rel_text_pos_embeddings)
 
     def score_emb(self, s_emb, p_emb, o_emb, combine: str, ground_truth_s: Tensor, ground_truth_p: Tensor, ground_truth_o: Tensor, targets_o: Tensor=None, **kwargs):
@@ -286,7 +292,7 @@ class TransformerScorer(RelationalScorer):
                                                              device=p_text_embeddings.device).bernoulli_(
                         self.p_text_dropout_replaced) & p_text_embeddings_dropout & ~p_text_embeddings_masked
                     p_text_embeddings[p_text_embeddings_masked] = self.mlm_mask_emb
-                    p_text_embeddings[p_text_embeddings_replaced] = self._relation_text_embedder._embeddings(
+                    p_text_embeddings[p_text_embeddings_replaced] = self._relation_text_embedder.embed_tokens(
                         torch.randint(low=0, high=self._relation_text_embedder.vocab_size,
                                       size=(p_text_embeddings_replaced.sum(),), device=p_text_embeddings.device))
 
@@ -305,6 +311,8 @@ class TransformerScorer(RelationalScorer):
                                  0) if self.enable_relation_structure else None,
                              (s_text_embeddings + self.text_pos_embeddings + self.sub_text_type_emb.unsqueeze(
                                  0)).transpose(1, 0) if self.enable_entity_text else None,
+                             self.seperator_emb.repeat((1, batch_size, 1))
+                                    if self.enable_entity_text and self.enable_relation_text else None,
                              (p_text_embeddings + self.rel_text_pos_embeddings + self.rel_text_type_emb.unsqueeze(
                                  0)).transpose(1, 0) if self.enable_relation_text else None,
                          )
@@ -324,6 +332,8 @@ class TransformerScorer(RelationalScorer):
                              if self.enable_entity_text else None,
                              (self.any_rel_text_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_text_type_emb)
                              if self.enable_relation_text else None,
+                             self.seperator_emb.repeat((1, num_o_embeddings, 1))
+                             if self.enable_entity_text and self.enable_relation_text else None,
                              torch.zeros(p_attention_mask.shape[1] - 1, num_o_embeddings, self.emb_dim,
                                          device=o_text_embeddings.device)
                              if self.enable_relation_text else None
@@ -336,13 +346,15 @@ class TransformerScorer(RelationalScorer):
                     ~torch.cat([x for x in (
                         torch.ones(batch_size, offset, dtype=torch.bool, device=ground_truth_s.device),
                         s_attention_mask.to(ground_truth_s.device) if self.enable_entity_text else None,
+                        torch.ones(batch_size, 1, dtype=torch.bool, device=ground_truth_s.device)
+                        if self.enable_relation_text and self.enable_entity_text else None,
                         p_attention_mask.to(ground_truth_s.device) if self.enable_relation_text else None,
                     ) if x is not None], dim=1),
                     ~torch.cat([x for x in (
                         torch.ones(num_o_embeddings, offset,
                                    dtype=torch.bool, device=ground_truth_o.device),
                         o_attention_mask if self.enable_entity_text else None,
-                        torch.ones(num_o_embeddings, self.enable_relation_text, dtype=torch.bool, device=ground_truth_o.device)
+                        torch.ones(num_o_embeddings, self.enable_relation_text + self.enable_entity_text, dtype=torch.bool, device=ground_truth_o.device)
                         if self.enable_relation_text else None,
                         torch.zeros(num_o_embeddings, p_attention_mask.shape[1] - 1, dtype=torch.bool, device=ground_truth_o.device)
                         if self.enable_relation_text else None,
@@ -374,7 +386,8 @@ class TransformerScorer(RelationalScorer):
                     )
                 if self.enable_relation_text and p_text_embeddings_dropout.any():
                     self_pred_loss_p_text_dropout = torch.nn.functional.cross_entropy(
-                        torch.mm(out[offset + s_attention_mask.shape[1]:][:, :batch_size][p_text_embeddings_dropout.transpose(1, 0)], self._relation_text_embedder.embed_all_tokens().transpose(1, 0)),
+                        torch.mm(out[offset + s_attention_mask.shape[1] + (self.enable_entity_text and self.enable_relation_text):]
+                                 [:, :batch_size][p_text_embeddings_dropout.transpose(1, 0)], self._relation_text_embedder.embed_all_tokens().transpose(1, 0)),
                         p_tokens[p_text_embeddings_dropout].to(out.device)
                     )
 
@@ -457,6 +470,18 @@ class Transformer(KgeModel):
             init_for_load_only=init_for_load_only,
         )
         self.get_scorer().set_embedders(self.get_s_embedder(), self.get_p_embedder(), self.get_o_embedder())
+        if isinstance(self.get_p_embedder(), SharedTextLookupEmbedder):
+            self.get_p_embedder()._set_shared_lookup_embedder(self.get_s_embedder(), dataset)
+        self.get_scorer()._initialize_text_embedders()
+
+
+    def prepare_job(self, job: "Job", **kwargs):
+        super().prepare_job(job, **kwargs)
+
+        job.pre_run_hooks.append(self._pre_run_hook)
+
+    def _pre_run_hook(self, job):
+        self.get_scorer()._initialize_text_embedders()
 
     def score_spo(self, s: Tensor, p: Tensor, o: Tensor, direction=None, **kwargs) -> Tensor:
         # We overwrite this method to ensure that ConvE only predicts towards objects.

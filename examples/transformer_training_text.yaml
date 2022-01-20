@@ -6,10 +6,10 @@ model: reciprocal_relations_model
 reciprocal_relations_model.base_model:
   type: transformer
 
-  self_pred_loss_weighing: equal
+  self_pred_loss_weighing: by_count
   s_dropout: 0.05
   o_dropout: 0.05
-  p_dropout: 0.
+  p_dropout: 0.1
   s_dropout_masked: 1.0
   o_dropout_masked: 1.0
   p_dropout_masked: 1.0
@@ -18,19 +18,19 @@ reciprocal_relations_model.base_model:
   p_dropout_replaced: 0.0
   s_text_dropout: 0.15
   o_text_dropout: 0.15
-  p_text_dropout: 0.0
+  p_text_dropout: 0.15
   s_text_dropout_masked: 1.0
   o_text_dropout_masked: 1.0
-  p_text_dropout_masked: 1.0
+  p_text_dropout_masked: 0.8
   s_text_dropout_replaced: 0.0
   o_text_dropout_replaced: 0.0
-  p_text_dropout_replaced: 0.0
+  p_text_dropout_replaced: 0.5
 
   enable_text: True
   enable_entity_structure: False
   enable_entity_text: True
-  enable_relation_structure: True
-  enable_relation_text: False
+  enable_relation_structure: False
+  enable_relation_text: True
   entity_built_in_text_embedder: False
   relation_built_in_text_embedder: False
 #  entity_embedder:
@@ -47,13 +47,14 @@ reciprocal_relations_model.base_model:
 #      dropout: 0.6
   entity_embedder:
     text_source: descriptions
-    tokenization:
+    include_relation_texts: True
+    #tokenization:
       #max_sentence_count: 0
       #max_word_count: 40
       #remove_partial_sentences: True
-      trainer:
-        min_frequency: 2
-        vocab_size: 100000
+    trainer:
+      min_frequency: 2
+      vocab_size: 100000
 #  relation_embedder:
 #    text_source: relations
 #    tokenization:
@@ -117,7 +118,7 @@ transformer:
     dim: 80
     dropout: 0.6
   relation_embedder:
-    type: lookup_embedder
+    type: shared_text_lookup_embedder
     initialize: xavier_normal_
     dim: 80
     dropout: 0.6

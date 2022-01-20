@@ -1,7 +1,7 @@
 # Stores explicitly an embedding for each object in a lookup table. See
 # https://pytorch.org/docs/stable/nn.html#torch.nn.Embedding
-text_lookup_embedder:
-  class_name: TextLookupEmbedder
+shared_text_lookup_embedder:
+  class_name: SharedTextLookupEmbedder
 
   # Dimensionality of the embedding
   dim: 100

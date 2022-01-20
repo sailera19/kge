@@ -1,3 +1,4 @@
+import itertools
 from dataclasses import dataclass
 
 import numpy as np
@@ -5,6 +6,7 @@ import regex
 from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.pre_tokenizers import CharDelimiterSplit, BertPreTokenizer
+from tokenizers.trainers import BpeTrainer
 from torch import Tensor
 import torch.nn
 import torch.nn.functional
@@ -17,6 +19,8 @@ from kge.misc import round_to_points
 from typing import List
 
 SENTENCE_SPLIT_REGEX = "(?<!\\d)\.(?<!\\d)"
+UNKNOWN_TOKEN = "[UNK]"
+INVERSE_TOKEN = "[INV]"
 
 @dataclass
 class TextLookupEmbedding:
@@ -42,15 +46,16 @@ class TextLookupEmbedder(KgeEmbedder):
         )
 
         self.lookup_vocab_size = vocab_size
+        self.tokenizer: Tokenizer = None
 
-        _, _, vocab_size = self.generate_token_mapping(dataset, config, configuration_key + ".tokenization")
+        self.ids_to_token_ids, self.attention_mask = self.generate_token_mapping(dataset)
 
         # read config
         self.normalize_p = self.get_option("normalize.p")
         self.regularize = self.check_option("regularize", ["", "lp"])
         self.sparse = self.get_option("sparse")
         self.config.check("train.trace_level", ["batch", "epoch"])
-        self.vocab_size = vocab_size
+        self.vocab_size = self.tokenizer.get_vocab_size()
 
         round_embedder_dim_to = self.get_option("round_dim_to")
         if len(round_embedder_dim_to) > 0:
@@ -109,10 +114,8 @@ class TextLookupEmbedder(KgeEmbedder):
         )
 
     def embed(self, indexes: Tensor) -> TextLookupEmbedding:
-        tokens, attention_mask, _ = self.dataset.index(self.index_name)
-        return TextLookupEmbedding(self._postprocess(self._embeddings(tokens.to(indexes.device)[indexes.long()])),
-                                   attention_mask.to(indexes.device)[indexes.long()], tokens[
-                                       indexes.long()])
+        return TextLookupEmbedding(self._postprocess(self._embeddings(self.ids_to_token_ids[indexes.long()].to(indexes.device))),
+                                   self.attention_mask[indexes.long()].to(indexes.device), self.ids_to_token_ids[indexes.long()].to(indexes.device))
 
     def embed_all(self) -> TextLookupEmbedding:
         embeddings = self._embeddings_all()
@@ -130,7 +133,7 @@ class TextLookupEmbedder(KgeEmbedder):
                                    attention_mask.to(self._embeddings.weight.data.device),
                                    tokens.to(self._embeddings.weight.data.device))
 
-    def embed_tokens(self, indexes: Tensor) -> TextLookupEmbedding:
+    def embed_tokens(self, indexes: Tensor) -> Tensor:
         return self._postprocess(self._embeddings(indexes.long()))
 
     def embed_all_tokens(self) -> Tensor:
@@ -139,15 +142,15 @@ class TextLookupEmbedder(KgeEmbedder):
             )))
 
     @property
-    def index_name(self):
+    def embedding_type(self):
         if "relation_embedder" in self.configuration_key or "relation_text_embedder" in self.configuration_key:
-            return "relation_ids_to_tokens"
+            return "relations"
         else:
-            return "entity_ids_to_tokens"
+            return "entities"
+
     @property
     def max_token_length(self):
-        tokens, _, _ = self.dataset.index(self.index_name)
-        return tokens.shape[1]
+        return self.ids_to_token_ids.shape[1]
 
     def _get_regularize_weight(self) -> Tensor:
         return self.get_option("regularize_weight")
@@ -200,63 +203,87 @@ class TextLookupEmbedder(KgeEmbedder):
 
         return result
 
-    def generate_token_mapping(self, dataset, config, configuration_key):
-        name = self.index_name
+    @property
+    def device(self):
+        return self._embeddings.weight.data.device
 
-        if not dataset._indexes.get(name):
-            unknown_token = "[UNK]"
-            special_tokens = [unknown_token]
+    def generate_token_mapping(self, dataset):
+        self.train_tokenizer(dataset)
 
-            if name == "relation_ids_to_tokens":
-                ids_to_strings = dataset.relation_strings()
-                # add inverse for reciprocals:
-                if dataset.num_relations() == len(ids_to_strings) * 2:
-                    inverse_token = "[INV]"
-                    special_tokens.append(inverse_token)
-                    ids_to_strings = [*ids_to_strings, *[inverse_token + " " + x for x in ids_to_strings]]
-            else:
-                if self.get_option("text_source") == "descriptions":
-                    ids_to_strings = dataset.entity_descriptions()
-                else:
-                    ids_to_strings = dataset.entity_strings()
-            ids_to_strings = [x.replace("_", " ") if isinstance(x, str) else "[UNK]" for x in
-                                     ids_to_strings]
-            max_sentence_count = config.get(configuration_key).get("max_sentence_count", 0)
-            if max_sentence_count > 0:
-                ids_to_strings = [". ".join(regex.split(SENTENCE_SPLIT_REGEX, x)[:max_sentence_count]) + "." for x in ids_to_strings]
-            max_word_count = config.get(configuration_key).get("max_word_count", 0)
-            if max_word_count > 0:
-                ids_to_strings = [" ".join(x.split(" ")[:max_word_count]) for x in ids_to_strings]
-            remove_partial_sentences = config.get(configuration_key).get("remove_partial_sentences", False)
-            if remove_partial_sentences:
-                ids_to_strings = [". ".join(regex.split(SENTENCE_SPLIT_REGEX, x)[:-1]) + "." if len(regex.split(SENTENCE_SPLIT_REGEX, x)) > 1 else x for x in ids_to_strings]
-            ids_to_strings = np.array(ids_to_strings)
-            train_triples = dataset.load_triples("train")
-            if name == "relation_ids_to_tokens":
-                strings_in_train = ids_to_strings[train_triples[:, 1].unique()]
-            else:
-                strings_in_train = ids_to_strings[torch.cat((train_triples[:, 0], train_triples[:, 2])).unique()]
-            strings_in_train = strings_in_train[~(strings_in_train == None)]
+        ids_to_strings, _ = self.prepare_texts(dataset, self.get_entity_texts(dataset), self.embedding_type)
 
-            tokenizer = Tokenizer(BPE())
+        entity_ids_to_tokens, attention_mask = self.encode_texts(ids_to_strings)
 
-            tokenizer.pre_tokenizer = BertPreTokenizer()
+        return entity_ids_to_tokens, attention_mask
 
-            from tokenizers.trainers import BpeTrainer
+    def train_tokenizer(self, dataset):
+        text_bases = {}
 
-            trainer = BpeTrainer(special_tokens=["[UNK]", "[CLS]", "[SEP]", "[PAD]", "[MASK]"],
-                                 **config.get(configuration_key).get("trainer"))
+        if self.embedding_type == "relations" or self.get_option("include_relation_texts"):
+            ids_to_strings = self.get_relation_texts(dataset)
+            text_bases["relations"] = {"ids_to_strings": ids_to_strings}
 
-            tokenizer.train_from_iterator(strings_in_train, trainer=trainer)
+        if self.embedding_type == "entities":
+            ids_to_strings = self.get_entity_texts(dataset)
+            text_bases["entities"] = {"ids_to_strings": ids_to_strings}
 
-            tokenizer.enable_padding()
+        for text_base, mapping in text_bases.items():
+            ids_to_strings, strings_in_train = self.prepare_texts(dataset, mapping["ids_to_strings"], text_base)
+            text_bases[text_base] = {"ids_to_strings": ids_to_strings, "strings_in_train": strings_in_train}
 
-            output = tokenizer.encode_batch([x if x else "" for x in ids_to_strings])
+        if not self.tokenizer:
+            self.tokenizer = Tokenizer(BPE())
 
-            entity_ids_to_tokens = torch.tensor([x.ids for x in output], dtype=torch.int64)
+            self.tokenizer.pre_tokenizer = BertPreTokenizer()
 
-            attention_mask = torch.tensor([x.attention_mask for x in output], dtype=torch.bool)
+            trainer = BpeTrainer(special_tokens=[UNKNOWN_TOKEN, INVERSE_TOKEN, "[PAD]"], **self.get_option("trainer"))
 
-            dataset._indexes[name] = entity_ids_to_tokens, attention_mask, tokenizer.get_vocab_size()
+            strings_in_train = list(itertools.chain.from_iterable([x["strings_in_train"] for _, x in text_bases.items()]))
 
-        return dataset._indexes[name]
+            self.tokenizer.train_from_iterator(strings_in_train, trainer=trainer)
+
+    def prepare_texts(self, dataset, ids_to_strings, text_base):
+        ids_to_strings = [x.replace("_", " ") if isinstance(x, str) else UNKNOWN_TOKEN for x in ids_to_strings]
+        max_sentence_count = self.get_option("max_sentence_count")
+        if max_sentence_count:
+            ids_to_strings = [". ".join(regex.split(SENTENCE_SPLIT_REGEX, x)[:max_sentence_count]) + "." for x in
+                              ids_to_strings]
+        max_word_count = self.get_option("max_word_count")
+        if max_word_count:
+            ids_to_strings = [" ".join(x.split(" ")[:max_word_count]) for x in ids_to_strings]
+        remove_partial_sentences = self.get_option("remove_partial_sentences")
+        if remove_partial_sentences:
+            ids_to_strings = [". ".join(regex.split(SENTENCE_SPLIT_REGEX, x)[:-1]) + "." if len(
+                regex.split(SENTENCE_SPLIT_REGEX, x)) > 1 else x for x in ids_to_strings]
+        ids_to_strings = np.array(ids_to_strings)
+        train_triples = dataset.load_triples("train")
+        if text_base == "relations":
+            strings_in_train = ids_to_strings[train_triples[:, 1].unique()]
+        else:
+            strings_in_train = ids_to_strings[torch.cat((train_triples[:, 0], train_triples[:, 2])).unique()]
+        strings_in_train = strings_in_train[~(strings_in_train == None)]
+        return ids_to_strings, strings_in_train
+
+    def get_entity_texts(self, dataset):
+        if self.get_option("text_source") == "descriptions":
+            ids_to_strings = dataset.entity_descriptions()
+        else:
+            ids_to_strings = dataset.entity_strings()
+        return ids_to_strings
+
+    def get_relation_texts(self, dataset, include_inverse=False):
+        ids_to_strings = dataset.relation_strings()
+        # add inverse for reciprocals:
+        if include_inverse or dataset.num_relations() == len(ids_to_strings) * 2:
+            ids_to_strings = [*ids_to_strings, *[INVERSE_TOKEN + " " + x for x in ids_to_strings]]
+        return ids_to_strings
+
+    def encode_texts(self, ids_to_strings):
+        self.tokenizer.enable_padding()
+        output = self.tokenizer.encode_batch([x if x else "" for x in ids_to_strings])
+
+        entity_ids_to_tokens = torch.tensor([x.ids for x in output], dtype=torch.int64)
+
+        attention_mask = torch.tensor([x.attention_mask for x in output], dtype=torch.bool)
+        return entity_ids_to_tokens, attention_mask
+

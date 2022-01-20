@@ -6,6 +6,7 @@ from kge.model.embedder.projection_embedder import ProjectionEmbedder
 from kge.model.embedder.tucker3_relation_embedder import Tucker3RelationEmbedder
 from kge.model.embedder.text_transformer_embedder import TextTransformerEmbedder
 from kge.model.embedder.text_lookup_embedder import TextLookupEmbedder
+from kge.model.embedder.shared_text_lookup_embedder import SharedTextLookupEmbedder
 
 # models
 from kge.model.complex import ComplEx
