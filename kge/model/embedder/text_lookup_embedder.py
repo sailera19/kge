@@ -4,9 +4,9 @@ from dataclasses import dataclass
 import numpy as np
 import regex
 from tokenizers import Tokenizer
-from tokenizers.models import BPE
+from tokenizers import models
 from tokenizers.pre_tokenizers import CharDelimiterSplit, BertPreTokenizer
-from tokenizers.trainers import BpeTrainer
+from tokenizers import trainers
 from torch import Tensor
 import torch.nn
 import torch.nn.functional
@@ -217,6 +217,10 @@ class TextLookupEmbedder(KgeEmbedder):
         return entity_ids_to_tokens, attention_mask
 
     def train_tokenizer(self, dataset):
+        if self.get_option("tokenizer_from_pretrained"):
+            self.tokenizer = Tokenizer.from_pretrained(self.get_option("tokenizer_from_pretrained"))
+            self.tokenizer.pre_tokenizer = BertPreTokenizer()
+
         text_bases = {}
 
         if self.embedding_type == "relations" or self.get_option("include_relation_texts"):
@@ -232,11 +236,14 @@ class TextLookupEmbedder(KgeEmbedder):
             text_bases[text_base] = {"ids_to_strings": ids_to_strings, "strings_in_train": strings_in_train}
 
         if not self.tokenizer:
-            self.tokenizer = Tokenizer(BPE())
+            model_class = getattr(models, self.get_option("tokenizer_model"))
+            self.tokenizer = Tokenizer(model_class(**self.get_option("tokenizer_model_parameters")))
 
             self.tokenizer.pre_tokenizer = BertPreTokenizer()
 
-            trainer = BpeTrainer(special_tokens=[UNKNOWN_TOKEN, INVERSE_TOKEN, "[PAD]"], **self.get_option("trainer"))
+            trainer_class = getattr(trainers, self.get_option("tokenizer_trainer"))
+
+            trainer = trainer_class(special_tokens=[UNKNOWN_TOKEN, INVERSE_TOKEN, "[PAD]"], **self.get_option("tokenizer_trainer_parameters"))
 
             strings_in_train = list(itertools.chain.from_iterable([x["strings_in_train"] for _, x in text_bases.items()]))
 
@@ -280,7 +287,7 @@ class TextLookupEmbedder(KgeEmbedder):
 
     def encode_texts(self, ids_to_strings):
         self.tokenizer.enable_padding()
-        output = self.tokenizer.encode_batch([x if x else "" for x in ids_to_strings])
+        output = self.tokenizer.encode_batch([x if x else "" for x in ids_to_strings], add_special_tokens=False)
 
         entity_ids_to_tokens = torch.tensor([x.ids for x in output], dtype=torch.int64)
 

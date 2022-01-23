@@ -6,7 +6,7 @@ model: reciprocal_relations_model
 reciprocal_relations_model.base_model:
   type: transformer
 
-  self_pred_loss_weighing: by_count
+  self_pred_loss_weighing: equal
   s_dropout: 0.05
   o_dropout: 0.05
   p_dropout: 0.1
@@ -46,14 +46,17 @@ reciprocal_relations_model.base_model:
 #    encoder:
 #      dropout: 0.6
   entity_embedder:
-    text_source: descriptions
+    text_source: entities
     include_relation_texts: True
+    # tokenizer_from_pretrained: "bert-base-uncased"
     #tokenization:
       #max_sentence_count: 0
       #max_word_count: 40
       #remove_partial_sentences: True
-    trainer:
-      min_frequency: 2
+    tokenizer_model: WordPiece
+    tokenizer_trainer: WordPieceTrainer
+    tokenizer_trainer_parameters:
+      min_frequency: 3
       vocab_size: 100000
 #  relation_embedder:
 #    text_source: relations
@@ -115,16 +118,16 @@ transformer:
   entity_embedder:
     type: text_lookup_embedder
     initialize: xavier_normal_
-    dim: 80
+    dim: 256
     dropout: 0.6
   relation_embedder:
     type: shared_text_lookup_embedder
     initialize: xavier_normal_
-    dim: 80
+    dim: 256
     dropout: 0.6
   text_embedder:
     initialize: xavier_normal_
-    dim: 80
+    dim: 256
     dropout: 0.6
 
 valid:

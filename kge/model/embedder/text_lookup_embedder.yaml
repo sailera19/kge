@@ -79,12 +79,17 @@ text_lookup_embedder:
   # Will be deprecated.
   round_dim_to: []
 
-  trainer:
-    +++: +++
-
   max_word_count: 0
   max_sentence_count: 0
   remove_partial_sentences: False
 
   text_source: entities
   include_relation_texts: False
+  # empty string for no pretrained tokenizer
+  tokenizer_from_pretrained: ""
+  tokenizer_model: BPE
+  tokenizer_model_parameters:
+    +++: +++
+  tokenizer_trainer: BpeTrainer
+  tokenizer_trainer_parameters:
+    +++: +++
