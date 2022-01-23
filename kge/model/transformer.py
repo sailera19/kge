@@ -330,10 +330,10 @@ class TransformerScorer(RelationalScorer):
                              (o_text_embeddings + self.text_pos_embeddings + self.sub_text_type_emb.unsqueeze(0))
                                  .transpose(1, 0)
                              if self.enable_entity_text else None,
-                             (self.any_rel_text_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_text_type_emb)
-                             if self.enable_relation_text else None,
                              self.seperator_emb.repeat((1, num_o_embeddings, 1))
                              if self.enable_entity_text and self.enable_relation_text else None,
+                             (self.any_rel_text_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_text_type_emb)
+                             if self.enable_relation_text else None,
                              torch.zeros(p_attention_mask.shape[1] - 1, num_o_embeddings, self.emb_dim,
                                          device=o_text_embeddings.device)
                              if self.enable_relation_text else None
@@ -354,7 +354,7 @@ class TransformerScorer(RelationalScorer):
                         torch.ones(num_o_embeddings, offset,
                                    dtype=torch.bool, device=ground_truth_o.device),
                         o_attention_mask if self.enable_entity_text else None,
-                        torch.ones(num_o_embeddings, self.enable_relation_text + self.enable_entity_text, dtype=torch.bool, device=ground_truth_o.device)
+                        torch.ones(num_o_embeddings, self.enable_relation_text + (self.enable_relation_text and self.enable_entity_text), dtype=torch.bool, device=ground_truth_o.device)
                         if self.enable_relation_text else None,
                         torch.zeros(num_o_embeddings, p_attention_mask.shape[1] - 1, dtype=torch.bool, device=ground_truth_o.device)
                         if self.enable_relation_text else None,

@@ -24,8 +24,8 @@ setup(
         "numba==0.50.*",
         "networkx==2.4",
         "pytorch-pretrained-bert==0.6.0",
-        "tokenizers==0.10.*",
-        "transformers==4.15.*",
+        "tokenizers==0.11.*",
+        "transformers==2.3.*",
     ],
     # Ax 0.1.10 requires python 3.7. Numba does not yet support for Python 3.9:
     # https://github.com/numba/numba/issues/6345
