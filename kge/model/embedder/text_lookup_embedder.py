@@ -1,8 +1,12 @@
 import itertools
+import json
 from dataclasses import dataclass
+from datetime import datetime
 
+import os
 import numpy as np
 import regex
+import tokenizers
 from tokenizers import Tokenizer
 from tokenizers import models
 from tokenizers.pre_tokenizers import CharDelimiterSplit, BertPreTokenizer
@@ -217,6 +221,19 @@ class TextLookupEmbedder(KgeEmbedder):
         return entity_ids_to_tokens, attention_mask
 
     def train_tokenizer(self, dataset):
+        tokenizers_folder = os.path.join(dataset.folder, "tokenizers")
+        if not os.path.exists(tokenizers_folder):
+            os.mkdir(tokenizers_folder)
+
+        tokenizers_dict_path = os.path.join(tokenizers_folder, "tokenizers.json")
+        saved_tokenizers = {}
+        if os.path.exists(tokenizers_dict_path):
+            with open(tokenizers_dict_path, "r") as file:
+                saved_tokenizers = json.load(file)
+            for tokenizer_name, tokenizer_config in saved_tokenizers.items():
+                if tokenizer_config == self.config.get(self.configuration_key):
+                    self.tokenizer = tokenizers.Tokenizer.from_file(os.path.join(tokenizers_folder, tokenizer_name))
+
         if self.get_option("tokenizer_from_pretrained"):
             self.tokenizer = Tokenizer.from_pretrained(self.get_option("tokenizer_from_pretrained"))
             self.tokenizer.pre_tokenizer = BertPreTokenizer()
@@ -248,6 +265,15 @@ class TextLookupEmbedder(KgeEmbedder):
             strings_in_train = list(itertools.chain.from_iterable([x["strings_in_train"] for _, x in text_bases.items()]))
 
             self.tokenizer.train_from_iterator(strings_in_train, trainer=trainer)
+
+            tokenizer_name = datetime.now().strftime("%Y%m%d%H%M%S")
+            self.tokenizer.save(os.path.join(tokenizers_folder, tokenizer_name))
+
+            saved_tokenizers.update({tokenizer_name: self.config.get(self.configuration_key)})
+
+            with open(tokenizers_dict_path, "w") as file:
+                json.dump(saved_tokenizers, file)
+
 
     def prepare_texts(self, dataset, ids_to_strings, text_base):
         ids_to_strings = [x.replace("_", " ") if isinstance(x, str) else UNKNOWN_TOKEN for x in ids_to_strings]
