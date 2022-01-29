@@ -296,7 +296,14 @@ class TransformerScorer(RelationalScorer):
                         torch.randint(low=0, high=self._relation_text_embedder.vocab_size,
                                       size=(p_text_embeddings_replaced.sum(),), device=p_text_embeddings.device))
 
-            offset = 1 + self.enable_entity_structure + self.enable_relation_structure
+            entity_text_length = s_text_embeddings.shape[1] if self.enable_entity_text else 0
+            relation_text_length = p_text_embeddings.shape[1] if self.enable_relation_text else 0
+
+            s_structure_position = self.enable_entity_structure
+            s_text_position = s_structure_position + self.enable_entity_text
+            seperator_position = s_text_position + entity_text_length
+            p_structure_position = seperator_position + self.enable_relation_structure
+            p_text_position = p_structure_position + self.enable_relation_text
 
             # transform the sp pairs
             out = self.encoder.forward(
@@ -307,12 +314,11 @@ class TransformerScorer(RelationalScorer):
                              self.cls_emb.repeat((1, batch_size, 1)),
                              (s_emb + self.sub_type_emb.unsqueeze(0)).unsqueeze(
                                  0) if self.enable_entity_structure else None,
-                             (p_emb + self.rel_type_emb.unsqueeze(0)).unsqueeze(
-                                 0) if self.enable_relation_structure else None,
                              (s_text_embeddings + self.text_pos_embeddings + self.sub_text_type_emb.unsqueeze(
                                  0)).transpose(1, 0) if self.enable_entity_text else None,
-                             self.seperator_emb.repeat((1, batch_size, 1))
-                                    if self.enable_entity_text and self.enable_relation_text else None,
+                             self.seperator_emb.repeat((1, batch_size, 1)),
+                             (p_emb + self.rel_type_emb.unsqueeze(0)).unsqueeze(
+                                 0) if self.enable_relation_structure else None,
                              (p_text_embeddings + self.rel_text_pos_embeddings + self.rel_text_type_emb.unsqueeze(
                                  0)).transpose(1, 0) if self.enable_relation_text else None,
                          )
@@ -325,13 +331,12 @@ class TransformerScorer(RelationalScorer):
                              self.o_cls_emb.repeat((1, num_o_embeddings, 1)),
                              (o_emb + self.o_type_emb.unsqueeze(0)).unsqueeze(0)
                              if self.enable_entity_structure else None,
-                             (self.any_rel_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_type_emb)
-                             if self.enable_relation_structure else None,
                              (o_text_embeddings + self.text_pos_embeddings + self.sub_text_type_emb.unsqueeze(0))
                                  .transpose(1, 0)
                              if self.enable_entity_text else None,
-                             self.seperator_emb.repeat((1, num_o_embeddings, 1))
-                             if self.enable_entity_text and self.enable_relation_text else None,
+                             self.seperator_emb.repeat((1, num_o_embeddings, 1)),
+                             (self.any_rel_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_type_emb)
+                             if self.enable_relation_structure else None,
                              (self.any_rel_text_type_emb.repeat(1, num_o_embeddings, 1) + self.rel_text_type_emb)
                              if self.enable_relation_text else None,
                              torch.zeros(p_attention_mask.shape[1] - 1, num_o_embeddings, self.emb_dim,
@@ -344,18 +349,15 @@ class TransformerScorer(RelationalScorer):
                 ), dim=1),
                 src_key_padding_mask=torch.cat((
                     ~torch.cat([x for x in (
-                        torch.ones(batch_size, offset, dtype=torch.bool, device=ground_truth_s.device),
+                        torch.ones(batch_size, 1 + self.enable_entity_structure, dtype=torch.bool, device=ground_truth_s.device),
                         s_attention_mask.to(ground_truth_s.device) if self.enable_entity_text else None,
-                        torch.ones(batch_size, 1, dtype=torch.bool, device=ground_truth_s.device)
-                        if self.enable_relation_text and self.enable_entity_text else None,
+                        torch.ones(batch_size, 1 + self.enable_relation_structure, dtype=torch.bool, device=ground_truth_s.device),
                         p_attention_mask.to(ground_truth_s.device) if self.enable_relation_text else None,
                     ) if x is not None], dim=1),
                     ~torch.cat([x for x in (
-                        torch.ones(num_o_embeddings, offset,
-                                   dtype=torch.bool, device=ground_truth_o.device),
+                        torch.ones(num_o_embeddings, 1 + self.enable_entity_structure, dtype=torch.bool, device=ground_truth_o.device),
                         o_attention_mask if self.enable_entity_text else None,
-                        torch.ones(num_o_embeddings, self.enable_relation_text + (self.enable_relation_text and self.enable_entity_text), dtype=torch.bool, device=ground_truth_o.device)
-                        if self.enable_relation_text else None,
+                        torch.ones(num_o_embeddings, 1 + self.enable_relation_structure + self.enable_relation_text, dtype=torch.bool, device=ground_truth_o.device),
                         torch.zeros(num_o_embeddings, p_attention_mask.shape[1] - 1, dtype=torch.bool, device=ground_truth_o.device)
                         if self.enable_relation_text else None,
                     ) if x is not None], dim=1)
@@ -366,12 +368,12 @@ class TransformerScorer(RelationalScorer):
             if self.training:
                 if self.enable_entity_structure and (s_dropout.any() or o_dropout.any()):
                     self_pred_loss_dropout = torch.nn.functional.cross_entropy(
-                        torch.mm(out[1][torch.cat((s_dropout, o_dropout))], self.s_embedder.embed_all().transpose(1, 0)),
+                        torch.mm(out[s_structure_position][torch.cat((s_dropout, o_dropout))], self.s_embedder.embed_all().transpose(1, 0)),
                         torch.cat((ground_truth_s[s_dropout], targets_o[o_dropout])),
                     )
                 if self.enable_entity_text and (s_text_embeddings_dropout.any() or o_text_embeddings_dropout.any()):
                     self_pred_loss_text_dropout = torch.nn.functional.cross_entropy(
-                        torch.mm(out[offset:offset + s_attention_mask.shape[1]][torch.cat(
+                        torch.mm(out[s_text_position:s_text_position + entity_text_length][torch.cat(
                             (s_text_embeddings_dropout.transpose(1, 0), o_text_embeddings_dropout.transpose(1, 0)),
                             dim=1)], self._text_embedder.embed_all_tokens().transpose(1, 0)),
                         torch.cat((s_tokens[s_text_embeddings_dropout].to(out.device),
@@ -380,13 +382,13 @@ class TransformerScorer(RelationalScorer):
 
                 if self.enable_relation_structure and p_dropout.any():
                     self_pred_loss_p_dropout = torch.nn.functional.cross_entropy(
-                        torch.mm(out[1 + self.enable_entity_structure][:, :batch_size][p_dropout],
+                        torch.mm(out[p_structure_position][:, :batch_size][p_dropout],
                                  self.p_embedder.embed_all().transpose(1, 0)),
                         torch.cat(ground_truth_p[p_dropout]),
                     )
                 if self.enable_relation_text and p_text_embeddings_dropout.any():
                     self_pred_loss_p_text_dropout = torch.nn.functional.cross_entropy(
-                        torch.mm(out[offset + s_attention_mask.shape[1] + (self.enable_entity_text and self.enable_relation_text):]
+                        torch.mm(out[p_text_position:p_text_position + relation_text_length]
                                  [:, :batch_size][p_text_embeddings_dropout.transpose(1, 0)], self._relation_text_embedder.embed_all_tokens().transpose(1, 0)),
                         p_tokens[p_text_embeddings_dropout].to(out.device)
                     )
