@@ -63,6 +63,8 @@ class TransformerScorer(RelationalScorer):
                         dataset,
                         self.configuration_key + ".relation_text_embedder",
                         dataset.num_relations())
+                if isinstance(self._relation_text_embedder, SharedTextLookupEmbedder) and self.entity_built_in_text_embedder:
+                    self._relation_text_embedder._set_shared_lookup_embedder(self._text_embedder, dataset)
                 self.rel_text_pos_embeddings = torch.nn.Parameter(torch.zeros((self._relation_text_embedder.max_token_length, self.emb_dim)))
                 self.initialize(self.rel_text_pos_embeddings)
 
@@ -295,11 +297,13 @@ class TransformerScorer(RelationalScorer):
                     p_text_embeddings[p_text_embeddings_replaced] = self._relation_text_embedder.embed_tokens(
                         torch.randint(low=0, high=self._relation_text_embedder.vocab_size,
                                       size=(p_text_embeddings_replaced.sum(),), device=p_text_embeddings.device))
+                else:
+                    p_text_embeddings_dropout = torch.zeros(1)
 
             entity_text_length = s_text_embeddings.shape[1] if self.enable_entity_text else 0
             relation_text_length = p_text_embeddings.shape[1] if self.enable_relation_text else 0
 
-            s_structure_position = self.enable_entity_structure
+            s_structure_position = int(self.enable_entity_structure)
             s_text_position = s_structure_position + self.enable_entity_text
             seperator_position = s_text_position + entity_text_length
             p_structure_position = seperator_position + self.enable_relation_structure
@@ -382,9 +386,9 @@ class TransformerScorer(RelationalScorer):
 
                 if self.enable_relation_structure and p_dropout.any():
                     self_pred_loss_p_dropout = torch.nn.functional.cross_entropy(
-                        torch.mm(out[p_structure_position][:, :batch_size][p_dropout],
+                        torch.mm(out[p_structure_position][:batch_size][p_dropout],
                                  self.p_embedder.embed_all().transpose(1, 0)),
-                        torch.cat(ground_truth_p[p_dropout]),
+                        ground_truth_p[p_dropout],
                     )
                 if self.enable_relation_text and p_text_embeddings_dropout.any():
                     self_pred_loss_p_text_dropout = torch.nn.functional.cross_entropy(
