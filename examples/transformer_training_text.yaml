@@ -110,25 +110,26 @@ negative_sampling:
 
 1vsBatch:
   self_pred_loss:
-    factor_type: decreasing
-    factor: 0.8
+    factor_type: fixed
+    factor: 1.0
     max_epoch: 400
     smoothing: 0
+    scale_at_epoch_start: True
 
 transformer:
   entity_embedder:
     type: lookup_embedder
     initialize: xavier_normal_
-    dim: 80
+    dim: 256
     dropout: 0.6
   relation_embedder:
     type: lookup_embedder
     initialize: xavier_normal_
-    dim: 80
+    dim: 256
     dropout: 0.6
   text_embedder:
     initialize: xavier_normal_
-    dim: 80
+    dim: 256
     dropout: 0.6
 
 valid:

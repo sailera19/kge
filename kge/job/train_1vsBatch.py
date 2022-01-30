@@ -23,6 +23,10 @@ class TrainingJob1vsBatch(TrainingJob):
         self.self_pred_loss_factor = config.get_default(self.type_str + ".self_pred_loss.factor")
         self.self_pred_loss_factor_max_epoch = config.get_default(self.type_str + ".self_pred_loss.max_epoch")
         self.self_pred_loss_smoothing = config.get_default(self.type_str + ".self_pred_loss.smoothing")
+        self.self_pred_loss_scale_at_epoch_start = config.get_default(self.type_str + ".self_pred_loss.scale_at_epoch_start")
+        self.scaling_factor = 1
+        self.scaling_epoch = -1
+
 
         if self.__class__ == TrainingJob1vsBatch:
             for f in Job.job_created_hooks:
@@ -83,8 +87,11 @@ class TrainingJob1vsBatch(TrainingJob):
             ground_truth=triples[:, 2])
         if isinstance(scores_sp, tuple):
             scores_sp, self_pred_loss_sp = scores_sp
-            self_pred_loss_sp *= self_pred_loss_factor
             loss_value_sp = self.loss(scores_sp, traceback) / batch_size
+            if self.self_pred_loss_scale_at_epoch_start and self.scaling_epoch != self.epoch:
+                self.scaling_factor = loss_value_sp.item() / self_pred_loss_sp.item()
+                self.scaling_epoch = self.epoch
+            self_pred_loss_sp *= self_pred_loss_factor * self.scaling_factor
             loss_value_sp = loss_value_sp + self_pred_loss_sp
             result.avg_loss_self += self_pred_loss_sp.item()
         else:
@@ -107,8 +114,8 @@ class TrainingJob1vsBatch(TrainingJob):
             ground_truth=triples[:, 0])
         if isinstance(scores_po, tuple):
             scores_po, self_pred_loss_po = scores_po
-            self_pred_loss_po *= self_pred_loss_factor
             loss_value_po = self.loss(scores_po, traceback) / batch_size
+            self_pred_loss_po *= self_pred_loss_factor * self.scaling_factor
             loss_value_po = loss_value_po + self_pred_loss_po
             result.avg_loss_self += self_pred_loss_po.item()
         else:

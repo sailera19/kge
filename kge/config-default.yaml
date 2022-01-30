@@ -314,6 +314,7 @@ train:
     factor: 1.0
     smoothing: 0
     max_epoch: 500
+    scale_at_epoch_start: False
 
 
 # Options for KvsAll training (train.type=="KvsAll")
