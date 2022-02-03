@@ -26,6 +26,7 @@ class TrainingJob1vsBatch(TrainingJob):
         self.self_pred_loss_scale_at_epoch_start = config.get_default(self.type_str + ".self_pred_loss.scale_at_epoch_start")
         self.scaling_factor = 1
         self.scaling_epoch = -1
+        self.num_samples = config.get_default(self.type_str + ".num_samples")
 
 
         if self.__class__ == TrainingJob1vsBatch:
@@ -80,6 +81,11 @@ class TrainingJob1vsBatch(TrainingJob):
         # forward/backward pass (sp)
         result.forward_time -= time.time()
         unique_targets, traceback = triples[:, 2].unique(return_inverse=True)
+        if len(unique_targets) < self.num_samples:
+            new_entities = torch.arange(0, self.dataset.num_entities(), device=unique_targets.device)
+            new_entities = new_entities[~(new_entities[..., None] == unique_targets).any(-1)]
+            new_entities = new_entities[torch.randperm(self.num_samples - len(unique_targets))]
+            unique_targets = torch.cat((unique_targets, new_entities))
         scores_sp = self.model.score_sp(
             triples[:, 0],
             triples[:, 1],
@@ -107,6 +113,11 @@ class TrainingJob1vsBatch(TrainingJob):
         result.forward_time -= time.time()
 
         unique_targets, traceback = triples[:, 0].unique(return_inverse=True)
+        if len(unique_targets) < self.num_samples:
+            new_entities = torch.arange(0, self.dataset.num_entities(), device=unique_targets.device)
+            new_entities = new_entities[~(new_entities[..., None] == unique_targets).any(-1)]
+            new_entities = new_entities[torch.randperm(self.num_samples - len(unique_targets))]
+            unique_targets = torch.cat((unique_targets, new_entities))
         scores_po = self.model.score_po(
             triples[:, 1],
             triples[:, 2],

@@ -66,5 +66,7 @@ transformer:
   o_text_dropout_replaced: 0.2
   p_text_dropout_replaced: 0.2
 
+  mask_all_text: 0.0
+
   # equal, by_count
   self_pred_loss_weighing: by_count

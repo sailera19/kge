@@ -309,6 +309,7 @@ train:
 
 1vsBatch:
   class_name: TrainingJob1vsBatch
+  num_samples: 0
   self_pred_loss:
     factor_type: fixed
     factor: 1.0

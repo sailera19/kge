@@ -107,6 +107,9 @@ class TransformerScorer(RelationalScorer):
         self.mlm_mask_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
         self.initialize(self.mlm_mask_emb)
 
+        self.all_text_mask_emb = torch.nn.parameter.Parameter(torch.zeros(self.emb_dim))
+        self.initialize(self.all_text_mask_emb)
+
         self.s_dropout = self.get_option("s_dropout")
         self.o_dropout = self.get_option("o_dropout")
         self.p_dropout = self.get_option("p_dropout")
@@ -126,6 +129,8 @@ class TransformerScorer(RelationalScorer):
         self.s_text_dropout_replaced = self.get_option("s_text_dropout_replaced")
         self.o_text_dropout_replaced = self.get_option("o_text_dropout_replaced")
         self.p_text_dropout_replaced = self.get_option("p_text_dropout_replaced")
+
+        self.mask_all_text = self.get_option("mask_all_text")
 
         self.feedforward_dim = self.get_option("encoder.dim_feedforward")
         if not self.feedforward_dim:
@@ -201,11 +206,20 @@ class TransformerScorer(RelationalScorer):
 
             s_tokens, s_attention_mask, s_text_embeddings = s_text_embeddings.tokens, s_text_embeddings.attention_mask, s_text_embeddings.embeddings
 
+            s_text_length = s_tokens.shape[1]
+
             if self.training:
+                if self.mask_all_text > 0.0:
+                    s_mask_all_text = torch.zeros(batch_size, dtype=torch.bool,
+                                                  device=s_text_embeddings.device).bernoulli_(self.mask_all_text)
+                    s_text_embeddings[s_mask_all_text] = self.all_text_mask_emb
+                else:
+                    s_mask_all_text = torch.zeros(batch_size, dtype=torch.bool, device=s_text_embeddings.device)
+
                 if self.enable_entity_structure:
-                    s_dropout = torch.zeros(len(s_emb), dtype=torch.bool).bernoulli_(self.s_dropout)
-                    s_masked = torch.zeros(len(s_emb), dtype=torch.bool).bernoulli_(self.s_dropout_masked) & s_dropout
-                    s_replaced = torch.zeros(len(s_emb), dtype=torch.bool).bernoulli_(self.s_dropout_replaced) & s_dropout & ~s_masked
+                    s_dropout = torch.zeros(len(s_emb), dtype=torch.bool, device=s_emb.device).bernoulli_(self.s_dropout) & ~s_mask_all_text
+                    s_masked = torch.zeros(len(s_emb), dtype=torch.bool, device=s_emb.device).bernoulli_(self.s_dropout_masked) & s_dropout
+                    s_replaced = torch.zeros(len(s_emb), dtype=torch.bool, device=s_emb.device).bernoulli_(self.s_dropout_replaced) & s_dropout & ~s_masked
                     s_emb[s_masked] = self.s_mask
                     s_emb[s_replaced] = self.s_embedder.embed(torch.randint(low=0, high=self.dataset.num_entities(), size=(s_replaced.sum(),), device=s_emb.device))
                     del s_masked, s_replaced
@@ -213,7 +227,7 @@ class TransformerScorer(RelationalScorer):
                     s_dropout = torch.zeros(1)
                 s_text_embeddings_dropout = torch.zeros(s_text_embeddings.shape[:2], dtype=torch.bool,
                                                         device=s_text_embeddings.device).bernoulli_(
-                    self.s_text_dropout) & s_attention_mask
+                    self.s_text_dropout) & s_attention_mask & ~s_mask_all_text.unsqueeze(1).repeat(1, s_text_length)
                 s_text_embeddings_masked = torch.zeros(s_text_embeddings.shape[:2], dtype=torch.bool,
                                                        device=s_text_embeddings.device).bernoulli_(
                     self.s_text_dropout_masked) & s_text_embeddings_dropout
@@ -242,10 +256,20 @@ class TransformerScorer(RelationalScorer):
             num_o_embeddings = len(o_tokens)
 
             if self.training:
+                if self.mask_all_text > 0.0:
+                    o_mask_all_text = torch.zeros(num_o_embeddings, dtype=torch.bool,
+                                                  device=o_text_embeddings.device).bernoulli_(self.mask_all_text)
+                    o_text_embeddings[o_mask_all_text] = self.all_text_mask_emb
+                else:
+                    o_mask_all_text = torch.zeros(num_o_embeddings, dtype=torch.bool, device=o_text_embeddings.device)
+
                 if self.enable_entity_structure:
-                    o_dropout = torch.zeros(len(o_emb), dtype=torch.bool).bernoulli_(self.o_dropout)
-                    o_masked = torch.zeros(len(o_emb), dtype=torch.bool).bernoulli_(self.o_dropout_masked) & o_dropout
-                    o_replaced = torch.zeros(len(o_emb), dtype=torch.bool).bernoulli_(self.o_dropout_replaced) & o_dropout & ~o_masked
+                    o_dropout = torch.zeros(len(o_emb), dtype=torch.bool, device=o_emb.device).bernoulli_(
+                        self.o_dropout) & ~o_mask_all_text
+                    o_masked = torch.zeros(len(o_emb), dtype=torch.bool, device=o_emb.device).bernoulli_(
+                        self.o_dropout_masked) & o_dropout
+                    o_replaced = torch.zeros(len(o_emb), dtype=torch.bool, device=o_emb.device).bernoulli_(
+                        self.o_dropout_replaced) & o_dropout & ~o_masked
                     o_emb[o_masked] = self.o_mask
                     o_emb[o_replaced] = self.o_embedder.embed(torch.randint(low=0, high=self.dataset.num_entities(), size=(o_replaced.sum(),), device=o_emb.device))
                     del o_masked, o_replaced
@@ -253,8 +277,9 @@ class TransformerScorer(RelationalScorer):
                     o_dropout = torch.zeros(1)
 
                 if self.enable_entity_text:
+                    o_text_length = o_tokens.shape[1]
                     o_text_embeddings_dropout = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool, device=o_text_embeddings.device).bernoulli_(
-                        self.o_text_dropout) & o_attention_mask
+                        self.o_text_dropout) & o_attention_mask & ~o_mask_all_text.unsqueeze(1).repeat(1, o_text_length)
                     o_text_embeddings_masked = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool, device=o_text_embeddings.device).bernoulli_(
                         self.o_text_dropout_masked) & o_text_embeddings_dropout
                     o_text_embeddings_replaced = torch.zeros(o_text_embeddings.shape[:2], dtype=torch.bool, device=o_text_embeddings.device).bernoulli_(
@@ -273,11 +298,23 @@ class TransformerScorer(RelationalScorer):
 
                 p_tokens, p_attention_mask, p_text_embeddings = p_text_embeddings.tokens, p_text_embeddings.attention_mask, p_text_embeddings.embeddings
 
+                p_text_length = p_tokens.shape[1]
+
             if self.training:
+                if self.mask_all_text > 0.0:
+                    p_mask_all_text = torch.zeros(batch_size, dtype=torch.bool,
+                                                  device=p_text_embeddings.device).bernoulli_(self.mask_all_text)
+                    p_text_embeddings[p_mask_all_text] = self.all_text_mask_emb
+                else:
+                    p_mask_all_text = torch.zeros(batch_size, dtype=torch.bool, device=p_text_embeddings.device)
+
                 if self.enable_relation_structure:
-                    p_dropout = torch.zeros(len(p_emb), dtype=torch.bool).bernoulli_(self.p_dropout)
-                    p_masked = torch.zeros(len(p_emb), dtype=torch.bool).bernoulli_(self.p_dropout_masked) & p_dropout
-                    p_replaced = torch.zeros(len(p_emb), dtype=torch.bool).bernoulli_(self.p_dropout_replaced) & p_dropout & ~p_masked
+                    p_dropout = torch.zeros(len(p_emb), dtype=torch.bool, device=p_emb.device).bernoulli_(
+                        self.p_dropout) & ~p_mask_all_text
+                    p_masked = torch.zeros(len(p_emb), dtype=torch.bool, device=p_emb.device).bernoulli_(
+                        self.p_dropout_masked) & p_dropout
+                    p_replaced = torch.zeros(len(p_emb), dtype=torch.bool, device=p_emb.device).bernoulli_(
+                        self.p_dropout_replaced) & p_dropout & ~p_masked
                     p_emb[p_masked] = self.p_mask
                     p_emb[p_replaced] = self.p_embedder.embed(torch.randint(low=0, high=self.dataset.num_relations(), size=(p_replaced.sum(),), device=p_emb.device))
                 else:
@@ -286,7 +323,7 @@ class TransformerScorer(RelationalScorer):
                 if self.enable_relation_text:
                     p_text_embeddings_dropout = torch.zeros(p_text_embeddings.shape[:2], dtype=torch.bool,
                                                             device=p_text_embeddings.device).bernoulli_(
-                        self.p_text_dropout) & p_attention_mask
+                        self.p_text_dropout) & p_attention_mask & ~p_mask_all_text.unsqueeze(1).repeat(1, p_text_length)
                     p_text_embeddings_masked = torch.zeros(p_text_embeddings.shape[:2], dtype=torch.bool,
                                                            device=p_text_embeddings.device).bernoulli_(
                         self.p_text_dropout_masked) & p_text_embeddings_dropout

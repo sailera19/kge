@@ -25,6 +25,7 @@ reciprocal_relations_model.base_model:
   s_text_dropout_replaced: 0.0
   o_text_dropout_replaced: 0.0
   p_text_dropout_replaced: 0.0
+  mask_all_text: 0.
 
   enable_text: True
   enable_entity_structure: True
@@ -109,12 +110,13 @@ negative_sampling:
     s: 128
 
 1vsBatch:
+  num_samples: 0
   self_pred_loss:
     factor_type: fixed
-    factor: 1.0
+    factor: 0.1
     max_epoch: 400
     smoothing: 0
-    scale_at_epoch_start: True
+    scale_at_epoch_start: False
 
 transformer:
   entity_embedder:
