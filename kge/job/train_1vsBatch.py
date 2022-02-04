@@ -84,7 +84,7 @@ class TrainingJob1vsBatch(TrainingJob):
         if len(unique_targets) < self.num_samples:
             new_entities = torch.arange(0, self.dataset.num_entities(), device=unique_targets.device)
             new_entities = new_entities[~(new_entities[..., None] == unique_targets).any(-1)]
-            new_entities = new_entities[torch.randperm(self.num_samples - len(unique_targets))]
+            new_entities = new_entities[torch.randperm(len(new_entities))[:self.num_samples - len(unique_targets)]]
             unique_targets = torch.cat((unique_targets, new_entities))
         scores_sp = self.model.score_sp(
             triples[:, 0],
@@ -116,7 +116,7 @@ class TrainingJob1vsBatch(TrainingJob):
         if len(unique_targets) < self.num_samples:
             new_entities = torch.arange(0, self.dataset.num_entities(), device=unique_targets.device)
             new_entities = new_entities[~(new_entities[..., None] == unique_targets).any(-1)]
-            new_entities = new_entities[torch.randperm(self.num_samples - len(unique_targets))]
+            new_entities = new_entities[torch.randperm(len(new_entities))[:self.num_samples - len(unique_targets)]]
             unique_targets = torch.cat((unique_targets, new_entities))
         scores_po = self.model.score_po(
             triples[:, 1],
