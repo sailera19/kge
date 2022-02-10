@@ -50,6 +50,9 @@ transformer:
   s_dropout: 0.3
   o_dropout: 0.3
   p_dropout: 0.3
+  s_dropout_loss: 1.0
+  o_dropout_loss: 1.0
+  p_dropout_loss: 1.0
   s_dropout_masked: 0.5
   o_dropout_masked: 0.5
   p_dropout_masked: 0.5
@@ -59,6 +62,9 @@ transformer:
   s_text_dropout: 0.3
   o_text_dropout: 0.3
   p_text_dropout: 0.3
+  s_text_dropout_loss: 1.0
+  o_text_dropout_loss: 1.0
+  p_text_dropout_loss: 1.0
   s_text_dropout_masked: 0.5
   o_text_dropout_masked: 0.5
   p_text_dropout_masked: 0.5

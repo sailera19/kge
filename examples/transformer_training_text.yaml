@@ -19,6 +19,9 @@ reciprocal_relations_model.base_model:
   s_text_dropout: 0.15
   o_text_dropout: 0.15
   p_text_dropout: 0.0
+  s_text_dropout_loss: 1.0
+  o_text_dropout_loss: 1.0
+  p_text_dropout_loss: 1.0
   s_text_dropout_masked: 1.0
   o_text_dropout_masked: 1.0
   p_text_dropout_masked: 1.0
@@ -107,10 +110,10 @@ negative_sampling:
   with_replacement: False
   implementation: batch
   num_samples:
-    s: 128
+    s: 150
 
 1vsBatch:
-  num_samples: 0
+  num_samples: 150
   self_pred_loss:
     factor_type: fixed
     factor: 0.1

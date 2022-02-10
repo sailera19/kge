@@ -131,11 +131,9 @@ class TextLookupEmbedder(KgeEmbedder):
         return embeddings
 
     def _embeddings_all(self) -> TextLookupEmbedding:
-        tokens, attention_mask, _ = self.dataset.index(self.index_name)
-        all_entities = torch.arange(self.lookup_vocab_size, dtype=torch.long, device=self._embeddings.weight.device)
-        return TextLookupEmbedding(self._embeddings(all_entities),
-                                   attention_mask.to(self._embeddings.weight.data.device),
-                                   tokens.to(self._embeddings.weight.data.device))
+        return TextLookupEmbedding(self._embeddings(self.ids_to_token_ids.to(self._embeddings.weight.data.device)),
+                                   self.attention_mask.to(self._embeddings.weight.data.device),
+                                   self.ids_to_token_ids.to(self._embeddings.weight.data.device))
 
     def embed_tokens(self, indexes: Tensor) -> Tensor:
         return self._postprocess(self._embeddings(indexes.long()))
