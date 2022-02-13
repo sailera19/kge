@@ -38,6 +38,8 @@ class TransformerScorer(RelationalScorer):
         self.p_embedder: KgeEmbedder = None
         self.o_embedder: KgeEmbedder = None
 
+        self.embedding_dropout = self.get_option("embedding_dropout")
+
         self.enable_text = self.get_option("enable_text")
         self.enable_entity_text = self.get_option("enable_entity_text")
         self.enable_entity_structure = self.get_option("enable_entity_structure")
@@ -367,7 +369,7 @@ class TransformerScorer(RelationalScorer):
             p_text_position = p_structure_position + self.enable_relation_text
 
             # transform the sp pairs
-            out = self.encoder.forward(
+            out = self.encoder.forward(torch.nn.functional.dropout(
                 torch.cat((
                     torch.cat(
                         [x for x in
@@ -407,7 +409,7 @@ class TransformerScorer(RelationalScorer):
                          if x is not None],
                         dim=0,
                     )
-                ), dim=1),
+                ), dim=1), self.embedding_dropout, training=self.training),
                 src_key_padding_mask=torch.cat((
                     ~torch.cat([x for x in (
                         torch.ones(batch_size, 1 + self.enable_entity_structure, dtype=torch.bool, device=ground_truth_s.device),
@@ -460,7 +462,7 @@ class TransformerScorer(RelationalScorer):
             o_emb = o_emb[0, ::]
 
         else:
-            out = self.encoder.forward(
+            out = self.encoder.forward(torch.nn.functional.dropout(
                 torch.stack(
                     (
                         self.cls_emb.repeat((batch_size, 1)),
@@ -468,7 +470,7 @@ class TransformerScorer(RelationalScorer):
                         p_emb + self.rel_type_emb.unsqueeze(0),
                     ),
                     dim=0,
-                )
+                ), self.embedding_dropout, training=self.training)
             )  # SxNxE = 3 x batch_size x emb_size
 
         # pick the transformed CLS embeddings

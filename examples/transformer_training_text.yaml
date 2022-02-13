@@ -6,6 +6,8 @@ model: reciprocal_relations_model
 reciprocal_relations_model.base_model:
   type: transformer
 
+  embedding_dropout: 0.6
+
   self_pred_loss_weighing: by_count
   s_dropout: 0.0
   o_dropout: 0.0
@@ -126,16 +128,16 @@ transformer:
     type: lookup_embedder
     initialize: xavier_normal_
     dim: 256
-    dropout: 0.6
+    dropout: 0.
   relation_embedder:
     type: lookup_embedder
     initialize: xavier_normal_
     dim: 256
-    dropout: 0.6
+    dropout: 0.
   text_embedder:
     initialize: xavier_normal_
     dim: 256
-    dropout: 0.6
+    dropout: 0.
 
 valid:
   early_stopping:
