@@ -10,6 +10,7 @@ from kge.job.eval import EvaluationJob
 from kge.job.eval_training_loss import TrainingLossEvaluationJob
 from kge.job.eval_entity_ranking import EntityRankingJob
 from kge.job.eval_entity_pair_ranking import EntityPairRankingJob
+from kge.job.eval_qualitative import QualitativeEvaluationJob
 from kge.job.search import SearchJob
 from kge.job.search_grid import GridSearchJob
 from kge.job.search_manual import ManualSearchJob

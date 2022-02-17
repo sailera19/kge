@@ -554,6 +554,11 @@ entity_ranking:
 training_loss:
   class_name: TrainingLossEvaluationJob
 
+qualitative_eval:
+  class_name: QualitativeEvaluationJob
+  top_k: 10
+  num_samples: 10
+
 ## EVALUATION ##################################################################
 
 
