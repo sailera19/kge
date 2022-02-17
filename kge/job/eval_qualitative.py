@@ -62,7 +62,7 @@ class QualitativeEvaluationJob(EvaluationJob):
                 chunk_size = math.ceil(chunk_size / 2)
                 print("new chunk_size: ", chunk_size)
 
-        file_path = f"quality_eval_{self.eval_split}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
+        file_path = f"{self.config.folder}/quality_eval_{self.eval_split}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt"
         with open(file_path, "w") as file:
 
             for item in output_list:
