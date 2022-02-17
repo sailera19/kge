@@ -39,7 +39,7 @@ class QualitativeEvaluationJob(EvaluationJob):
                     triples = triples.to(self.device)
                     batch_scores_sp = None
                     batch_scores_po = None
-                    for chunk_number in range(math.ceil(self.dataset.num_entities() / chunk_size)):
+                    for chunk_number in range(3):#math.ceil(self.dataset.num_entities() / chunk_size)):
                         chunk_start = chunk_number * chunk_size
                         chunk_end = (chunk_number + 1) * chunk_size
                         chunk_end = self.dataset.num_entities() if chunk_end > self.dataset.num_entities() else chunk_end
@@ -55,7 +55,7 @@ class QualitativeEvaluationJob(EvaluationJob):
                             batch_scores_sp[i].sort(dim=0, descending=True)[1][:self.top_k].tolist(),
                             batch_scores_po[i].sort(dim=0, descending=True)[1][:self.top_k].tolist()))
                     if len(output_list) >= self.num_samples:
-                        done = True
+                        break
 
                 done = True
             except RuntimeError as e:
