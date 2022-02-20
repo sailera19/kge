@@ -1,0 +1,292 @@
+1vsAll:
+  class_name: TrainingJob1vsAll
+1vsBatch:
+  class_name: TrainingJob1vsBatch
+  num_samples: 0
+  self_pred_loss:
+    factor: 1.0
+    factor_type: fixed
+    max_epoch: 500
+    scale_at_epoch_start: false
+    smoothing: 0
+KvsAll:
+  class_name: TrainingJobKvsAll
+  label_smoothing: 0.0
+  query_types:
+    _po: true
+    s_o: false
+    sp_: true
+ax_search:
+  class_name: AxSearchJob
+  num_sobol_trials: -1
+  num_trials: 10
+  parameter_constraints: []
+  parameters: []
+  sobol_seed: 0
+console:
+  format: {}
+  quiet: false
+conve:
+  2D_aspect_ratio: 2
+  class_name: ConvE
+  convolution_bias: true
+  entity_embedder:
+    +++: +++
+    dropout: 0.2
+    type: lookup_embedder
+  feature_map_dropout: 0.2
+  filter_size: 3
+  padding: 0
+  projection_dropout: 0.3
+  relation_embedder:
+    +++: +++
+    dropout: 0.2
+    type: lookup_embedder
+  round_dim: true
+  stride: 1
+dataset:
+  +++: +++
+  files:
+    +++: +++
+    entity_ids:
+      filename: entity_ids.del
+      type: map
+    entity_strings:
+      filename: entity_ids.del
+      type: map
+    relation_ids:
+      filename: relation_ids.del
+      type: map
+    relation_strings:
+      filename: relation_ids.del
+      type: map
+    test:
+      filename: test.del
+      type: triples
+    train:
+      filename: train.del
+      type: triples
+    valid:
+      filename: valid.del
+      type: triples
+  name: wnrr
+  num_entities: -1
+  num_relations: -1
+  pickle: true
+ensemble_model:
+  class_name: EnsembleModel
+  model1:
+    +++: +++
+    entity_embedder:
+      dim: 128
+    relation_embedder:
+      dim: 128
+    type: complex
+    offset: 0.0
+  model2:
+    +++: +++
+    base_model:
+      enable_entity_structure: false
+      enable_entity_text: true
+      enable_relation_structure: false
+      enable_relation_text: true
+      enable_text: true
+      entity_built_in_text_embedder: false
+      entity_embedder:
+        dim: 256
+        dropout: 0.6
+        include_relation_texts: true
+        initialize: xavier_normal_
+        text_source: descriptions
+        tokenizer_model: WordPiece
+        tokenizer_trainer: WordPieceTrainer
+        tokenizer_trainer_parameters:
+          min_frequency: 3
+          vocab_size: 100000
+        type: text_lookup_embedder
+      o_dropout: 0.05
+      o_dropout_masked: 1.0
+      o_dropout_replaced: 0.0
+      o_text_dropout: 0.0
+      o_text_dropout_masked: 1.0
+      o_text_dropout_replaced: 0.0
+      p_dropout: 0.1
+      p_dropout_masked: 1.0
+      p_dropout_replaced: 0.0
+      p_text_dropout: 0.15
+      p_text_dropout_masked: 0.8
+      p_text_dropout_replaced: 0.5
+      relation_built_in_text_embedder: false
+      relation_embedder:
+        dim: 256
+        dropout: 0.6
+        initialize: xavier_normal_
+        type: shared_text_lookup_embedder
+      s_dropout: 0.05
+      s_dropout_masked: 1.0
+      s_dropout_replaced: 0.0
+      s_text_dropout: 0.15
+      s_text_dropout_masked: 1.0
+      s_text_dropout_replaced: 0.0
+      self_pred_loss_weighing: by_count
+      type: transformer
+    type: reciprocal_relations_model
+    offset: 0.0
+entity_ranking:
+  chunk_size: 512
+  class_name: EntityRankingJob
+  filter_splits:
+  - train
+  - valid
+  filter_with_test: true
+  hits_at_k_s:
+  - 1
+  - 3
+  - 10
+  - 50
+  - 100
+  - 200
+  - 300
+  - 400
+  - 500
+  - 1000
+  metrics_per:
+    argument_frequency: false
+    head_and_tail: false
+    relation_type: false
+  tie_handling:
+    atol: 1e-05
+    rtol: 1e-04
+    type: rounded_mean_rank
+eval:
+  batch_size: 200
+  num_workers: 0
+  pin_memory: false
+  split: valid
+  trace_level: epoch
+  type: entity_ranking
+grid_search:
+  class_name: GridSearchJob
+  parameters:
+    ensemble_model.model1.weight: [0.1, 0.2, 0.5, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0]
+    ensemble_model.model2.weight: [0.1, 0.2, 0.5, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0]
+  run: true
+import:
+- ensemble_model
+job:
+  device: cuda:0
+  device_pool: []
+  multi_gpu: false
+  type: search
+lookup_embedder:
+  class_name: LookupEmbedder
+  dim: 90
+  dropout: 0.0
+  initialize: xavier_normal_
+  initialize_args:
+    +++: +++
+  normalize:
+    p: -1.0
+  pretrain:
+    ensure_all: false
+    model_filename: ''
+  regularize: lp
+  regularize_args:
+    +++: +++
+    p: 2
+    weighted: false
+  regularize_weight: 0.0
+  round_dim_to: []
+  sparse: false
+manual_search:
+  class_name: ManualSearchJob
+  configurations: []
+  run: true
+model: ensemble_model
+modules:
+- kge.job
+- kge.model
+- kge.model.embedder
+negative_sampling:
+  class_name: TrainingJobNegativeSampling
+  filtering:
+    implementation: fast_if_available
+    o: false
+    p: false
+    s: false
+    split: ''
+  frequency:
+    smoothing: 1
+  implementation: auto
+  num_samples:
+    o: -1
+    p: 0
+    s: 3
+  sampling_type: uniform
+  shared: false
+  shared_type: default
+  with_replacement: true
+qualitative_eval:
+  class_name: QualitativeEvaluationJob
+  num_samples: 10
+  top_k: 10
+random_seed:
+  default: -1
+  numba: -1
+  numpy: -1
+  python: -1
+  torch: -1
+search:
+  device_pool: []
+  num_workers: 1
+  on_error: abort
+  type: grid_search
+train:
+  abort_on_nan: true
+  auto_correct: false
+  batch_size: 256
+  checkpoint:
+    every: 5
+    keep: 3
+    keep_init: true
+  loss: kl
+  loss_arg: .nan
+  lr_scheduler: ReduceLROnPlateau
+  lr_scheduler_args:
+    +++: +++
+    factor: 0.5
+    mode: max
+    patience: 2
+  lr_warmup: 50
+  max_epochs: 1
+  num_workers: 0
+  optimizer:
+    +++: +++
+    default:
+      args:
+        +++: +++
+        lr: 0.001
+      type: Adam
+  pin_memory: false
+  split: train
+  subbatch_auto_tune: true
+  subbatch_size: -1
+  trace_level: epoch
+  type: train_nothing
+  visualize_graph: false
+training_loss:
+  class_name: TrainingLossEvaluationJob
+user:
+  +++: +++
+valid:
+  early_stopping:
+    patience: 5
+    threshold:
+      epochs: 0
+      metric_value: 0.0
+  every: 1
+  metric: mean_reciprocal_rank_filtered_with_test
+  metric_expr: float("nan")
+  metric_max: true
+  split: valid
+  trace_level: epoch

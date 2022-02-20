@@ -484,7 +484,7 @@ class KgeModel(KgeBase):
                 model_name = config.get("model")
             config._import(model_name)
             class_name = config.get(model_name + ".class_name")
-        except:
+        except Exception as e:
             raise Exception("Can't find {}.type in config".format(configuration_key))
 
         try:

@@ -317,6 +317,8 @@ train:
     max_epoch: 500
     scale_at_epoch_start: False
 
+train_nothing:
+  class_name: TrainingJobNothing
 
 # Options for KvsAll training (train.type=="KvsAll")
 KvsAll:

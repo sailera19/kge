@@ -6,6 +6,7 @@ from kge.job.train_1vsAll import TrainingJob1vsAll
 from kge.job.train_1vsBatch import TrainingJob1vsBatch
 from kge.job.train_KvsAll import TrainingJobKvsAll
 from kge.job.train_negative_sampling import TrainingJobNegativeSampling
+from kge.job.train_nothing import TrainingJobNothing
 from kge.job.eval import EvaluationJob
 from kge.job.eval_training_loss import TrainingLossEvaluationJob
 from kge.job.eval_entity_ranking import EntityRankingJob

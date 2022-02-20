@@ -1,0 +1,14 @@
+import: [conve]
+
+ensemble_model:
+  class_name: EnsembleModel
+  model1:
+    type: conve
+    weight: 1.0
+    offset: 0.0
+    +++: +++
+  model2:
+    type: conve
+    weight: 1.0
+    offset: 0.0
+    +++: +++

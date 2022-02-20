@@ -25,3 +25,4 @@ from kge.model.trme import TrmE
 
 # meta models
 from kge.model.reciprocal_relations_model import ReciprocalRelationsModel
+from kge.model.ensemble_model import EnsembleModel
