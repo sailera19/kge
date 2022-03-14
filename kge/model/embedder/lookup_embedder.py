@@ -133,7 +133,7 @@ class LookupEmbedder(KgeEmbedder):
                 unique_indexes, counts = torch.unique(
                     kwargs["indexes"], return_counts=True
                 )
-                parameters = self._embeddings(unique_indexes)
+                parameters = self._embeddings(unique_indexes.to(self._embeddings.weight.data.device))
                 if p % 2 == 1:
                     parameters = torch.abs(parameters)
                 result += [
@@ -142,7 +142,7 @@ class LookupEmbedder(KgeEmbedder):
                         (
                             regularize_weight
                             / p
-                            * (parameters ** p * counts.float().view(-1, 1))
+                            * (parameters ** p * counts.float().to(self._embeddings.weight.data.device).view(-1, 1))
                         ).sum()
                         # In contrast to unweighted Lp regularization, rescaling by
                         # number of triples/indexes is necessary here so that penalty

@@ -2,9 +2,9 @@
   class_name: TrainingJob1vsAll
 1vsBatch:
   class_name: TrainingJob1vsBatch
-  num_samples: 0
+  num_samples: 512
   self_pred_loss:
-    factor: 1.0
+    factor: 0.
     factor_type: fixed
     max_epoch: 500
     scale_at_epoch_start: false
@@ -69,7 +69,7 @@ dataset:
     valid:
       filename: valid.del
       type: triples
-  name: wnrr
+  name: fb15k-237
   num_entities: -1
   num_relations: -1
   pickle: true
@@ -78,14 +78,23 @@ ensemble_model:
   model1:
     +++: +++
     entity_embedder:
-      dim: 128
+      dim: 256
     relation_embedder:
-      dim: 128
-    type: complex
-    offset: 0.0
+      dim: 256
+    type: reciprocal_relations_model
+    base_model:
+      entity_embedder:
+        dim: 256
+      relation_embedder:
+        dim: 256
+      type: complex
+    weight: 1.0
+    offset: 0.
   model2:
     +++: +++
     base_model:
+      +++: +++
+      embedding_dropout: 0.0
       enable_entity_structure: false
       enable_entity_text: true
       enable_relation_structure: false
@@ -96,7 +105,7 @@ ensemble_model:
         dim: 256
         dropout: 0.6
         include_relation_texts: true
-        initialize: xavier_normal_
+        max_word_count: 40
         text_source: descriptions
         tokenizer_model: WordPiece
         tokenizer_trainer: WordPieceTrainer
@@ -107,13 +116,14 @@ ensemble_model:
       o_dropout: 0.05
       o_dropout_masked: 1.0
       o_dropout_replaced: 0.0
-      o_text_dropout: 0.0
+      o_text_dropout: 0.15
+      o_text_dropout_loss: 0.125
       o_text_dropout_masked: 1.0
       o_text_dropout_replaced: 0.0
       p_dropout: 0.1
       p_dropout_masked: 1.0
       p_dropout_replaced: 0.0
-      p_text_dropout: 0.15
+      p_text_dropout: 0.0
       p_text_dropout_masked: 0.8
       p_text_dropout_replaced: 0.5
       relation_built_in_text_embedder: false
@@ -131,7 +141,8 @@ ensemble_model:
       self_pred_loss_weighing: by_count
       type: transformer
     type: reciprocal_relations_model
-    offset: 0.0
+    weight: 1.0
+    offset: 0.
 entity_ranking:
   chunk_size: 512
   class_name: EntityRankingJob
@@ -159,7 +170,7 @@ entity_ranking:
     rtol: 1e-04
     type: rounded_mean_rank
 eval:
-  batch_size: 200
+  batch_size: 400
   num_workers: 0
   pin_memory: false
   split: valid
@@ -168,8 +179,7 @@ eval:
 grid_search:
   class_name: GridSearchJob
   parameters:
-    ensemble_model.model1.weight: [0.1, 0.2, 0.5, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0]
-    ensemble_model.model2.weight: [0.1, 0.2, 0.5, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 32.0]
+    ensemble_model.alpha: [0.5]
   run: true
 import:
 - ensemble_model
@@ -180,7 +190,7 @@ job:
   type: search
 lookup_embedder:
   class_name: LookupEmbedder
-  dim: 90
+  dim: 256
   dropout: 0.0
   initialize: xavier_normal_
   initialize_args:
@@ -257,22 +267,22 @@ train:
     factor: 0.5
     mode: max
     patience: 2
-  lr_warmup: 50
-  max_epochs: 1
+  lr_warmup: 0
+  max_epochs: 20
   num_workers: 0
   optimizer:
     +++: +++
     default:
       args:
         +++: +++
-        lr: 0.001
+        lr: 0.1
       type: Adam
   pin_memory: false
   split: train
   subbatch_auto_tune: true
   subbatch_size: -1
   trace_level: epoch
-  type: train_nothing
+  type: 1vsBatch
   visualize_graph: false
 training_loss:
   class_name: TrainingLossEvaluationJob
@@ -284,7 +294,7 @@ valid:
     threshold:
       epochs: 0
       metric_value: 0.0
-  every: 1
+  every: 5
   metric: mean_reciprocal_rank_filtered_with_test
   metric_expr: float("nan")
   metric_max: true

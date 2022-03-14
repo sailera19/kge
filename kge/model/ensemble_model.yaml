@@ -2,6 +2,11 @@ import: [conve]
 
 ensemble_model:
   class_name: EnsembleModel
+  enable_weights_grad: False
+  enable_models_grad: False
+  alpha: 0.5
+  checkpoint1: ""
+  checkpoint2: ""
   model1:
     type: conve
     weight: 1.0
