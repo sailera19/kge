@@ -1,0 +1,144 @@
+job.type: train
+dataset.name: wnrr
+
+import: [transformer]
+model: reciprocal_relations_model
+reciprocal_relations_model.base_model:
+  type: transformer
+  pretrained_name: google/bert_uncased_L-4_H-256_A-4
+
+  self_pred_loss_weighing: by_count
+  s_dropout: 0.05
+  o_dropout: 0.05
+  p_dropout: 0.1
+  s_dropout_masked: 1.0
+  o_dropout_masked: 1.0
+  p_dropout_masked: 1.0
+  s_dropout_replaced: 0.0
+  o_dropout_replaced: 0.0
+  p_dropout_replaced: 0.0
+  s_text_dropout: 0.15
+  o_text_dropout: 0.
+  p_text_dropout: 0.15
+  s_text_dropout_masked: 1.0
+  o_text_dropout_masked: 1.0
+  p_text_dropout_masked: 0.8
+  s_text_dropout_replaced: 0.0
+  o_text_dropout_replaced: 0.0
+  p_text_dropout_replaced: 0.5
+
+  enable_text: True
+  enable_entity_structure: False
+  enable_entity_text: True
+  enable_relation_structure: False
+  enable_relation_text: True
+  entity_built_in_text_embedder: False
+  relation_built_in_text_embedder: False
+#  entity_embedder:
+#    type: text_lookup_embedder
+#    tokenization:
+#      trainer:
+#        min_frequency: 5
+#    initialize: normal_
+#    initialize_args:
+#      std: 0.02
+#    dim: 80
+#    dropout: 0.6
+#    encoder:
+#      dropout: 0.6
+  entity_embedder:
+    text_source: descriptions
+    include_relation_texts: True
+    tokenizer_from_pretrained: "bert-base-uncased"
+    #tokenization:
+      #max_sentence_count: 0
+      #max_word_count: 40
+      #remove_partial_sentences: True
+    tokenizer_model: WordPiece
+    tokenizer_trainer: WordPieceTrainer
+    tokenizer_trainer_parameters:
+      min_frequency: 3
+      vocab_size: 100000
+#  relation_embedder:
+#    text_source: relations
+#    tokenization:
+#      trainer:
+#        min_frequency: 2
+#        vocab_size: 100000
+#  relation_text_embedder:
+#    initialize: xavier_normal_
+#    dim: 80
+#    dropout: 0.6
+#    text_source: relations
+#    tokenization:
+#      trainer:
+#        min_frequency: 2
+#        vocab_size: 100000
+#  text_embedder:
+#    initialize: xavier_normal_
+#    dim: 80
+#    dropout: 0.6
+#    text_source: descriptions
+#    tokenization:
+#      trainer:
+#        min_frequency: 2
+#        vocab_size: 100000
+
+
+
+train:
+  optimizer: Adam
+  optimizer_args:
+    lr: 0.001
+  batch_size: 256
+  max_epochs: 500
+  loss: kl
+  type: 1vsBatch
+  lr_scheduler: ReduceLROnPlateau
+  lr_scheduler_args:
+    mode: max
+    patience: 2
+    factor: 0.5
+  lr_warmup: 50
+
+negative_sampling:
+  shared: True
+  with_replacement: False
+  implementation: batch
+  num_samples:
+    s: 128
+
+1vsBatch:
+  num_samples: 150
+  self_pred_loss:
+    factor_type: decreasing
+    factor: 0.8
+    max_epoch: 400
+    smoothing: 0
+
+transformer:
+  entity_embedder:
+    type: text_lookup_embedder
+    initialize: xavier_normal_
+    dim: 256
+    dropout: 0.6
+    from_huggingface_pretrained: google/bert_uncased_L-4_H-256_A-4
+  relation_embedder:
+    type: shared_text_lookup_embedder
+    initialize: xavier_normal_
+    dim: 256
+    dropout: 0.6
+  text_embedder:
+    initialize: xavier_normal_
+    dim: 256
+    dropout: 0.6
+
+valid:
+  early_stopping:
+    patience: 10
+  every: 5
+  metric: mean_reciprocal_rank_filtered_with_test
+
+eval.batch_size: 1024
+# eval.batch_size: 100000
+entity_ranking.chunk_size: 128

@@ -14,6 +14,7 @@ from tokenizers import trainers
 from torch import Tensor
 import torch.nn
 import torch.nn.functional
+from transformers import BertModel
 
 from kge import Config, Dataset
 from kge.job import Job
@@ -73,6 +74,9 @@ class TextLookupEmbedder(KgeEmbedder):
             # initialize weights
             self.initialize(self._embeddings.weight.data)
             self._normalize_embeddings()
+
+        if self.get_option("from_huggingface_pretrained"):
+            self._embeddings = BertModel.from_pretrained(self.get_option("from_huggingface_pretrained")).get_input_embeddings()
 
         # TODO handling negative dropout because using it with ax searches for now
         dropout = self.get_option("dropout")

@@ -1,11 +1,10 @@
 import numpy as np
 import torch
 import torch.nn
-from tokenizers import Tokenizer
-from tokenizers.models import BPE
-from tokenizers.pre_tokenizers import CharDelimiterSplit, Sequence, Digits, Whitespace, BertPreTokenizer
 from torch import Tensor
 import math
+
+from transformers import BertTokenizer, BertModel
 
 from kge import Config, Dataset
 from kge.model import SharedTextLookupEmbedder
@@ -37,6 +36,8 @@ class TransformerScorer(RelationalScorer):
         self.s_embedder: KgeEmbedder = None
         self.p_embedder: KgeEmbedder = None
         self.o_embedder: KgeEmbedder = None
+
+        self.pretrained_name = self.get_option("pretrained_name")
 
         self.embedding_dropout = self.get_option("embedding_dropout")
 
@@ -154,27 +155,11 @@ class TransformerScorer(RelationalScorer):
                 )
                 dropout = 0.0
 
-        encoder_layer = torch.nn.TransformerEncoderLayer(
-            d_model=self.emb_dim,
-            nhead=self.get_option("encoder.nhead"),
-            dim_feedforward=self.feedforward_dim,
-            dropout=dropout,
-            activation=self.get_option("encoder.activation"),
-        )
-        self.encoder = torch.nn.TransformerEncoder(
-            encoder_layer, num_layers=self.get_option("encoder.num_layers")
-        )
-        for layer in self.encoder.layers:
-            self.initialize(layer.linear1.weight.data)
-            self.initialize(layer.linear2.weight.data)
-            self.initialize(layer.self_attn.out_proj.weight.data)
-
-            if layer.self_attn._qkv_same_embed_dim:
-                self.initialize(layer.self_attn.in_proj_weight)
-            else:
-                self.initialize(layer.self_attn.q_proj_weight)
-                self.initialize(layer.self_attn.k_proj_weight)
-                self.initialize(layer.self_attn.v_proj_weight)
+        self.encoder = BertModel.from_pretrained(self.pretrained_name)
+        self.tokenizer = BertTokenizer.from_pretrained(self.pretrained_name)
+        self.seperator_emb = torch.nn.parameter.Parameter(self.encoder.embeddings.word_embeddings(torch.LongTensor([self.tokenizer.sep_token_id])))
+        self.mlm_mask_emb = torch.nn.parameter.Parameter(self.encoder.embeddings.word_embeddings(torch.LongTensor([self.tokenizer.mask_token_id])))
+        print("done")
 
     def set_embedders(self, s_embedder, p_embedder, o_embedder):
         self.s_embedder = s_embedder
@@ -184,12 +169,12 @@ class TransformerScorer(RelationalScorer):
     def _initialize_text_embedders(self):
         if isinstance(self.s_embedder, TextLookupEmbedder):
             self._text_embedder = self.s_embedder
-            self.text_pos_embeddings = torch.nn.Parameter(torch.zeros((self._text_embedder.max_token_length, self.emb_dim), device=self.s_embedder.device))
+            self.text_pos_embeddings = torch.nn.Parameter(self.encoder.embeddings.position_embeddings.weight[:self._text_embedder.max_token_length])
             self.initialize(self.text_pos_embeddings)
         if isinstance(self.p_embedder, TextLookupEmbedder) or isinstance(self.p_embedder, SharedTextLookupEmbedder):
             self._relation_text_embedder = self.p_embedder
             self.rel_text_pos_embeddings = torch.nn.Parameter(
-                torch.zeros((self._relation_text_embedder.max_token_length, self.emb_dim), device=self.p_embedder.device))
+                self.encoder.embeddings.position_embeddings.weight[:self._relation_text_embedder.max_token_length])
             self.initialize(self.rel_text_pos_embeddings)
 
     def score_emb(self, s_emb, p_emb, o_emb, combine: str, ground_truth_s: Tensor, ground_truth_p: Tensor, ground_truth_o: Tensor, targets_o: Tensor=None, **kwargs):
@@ -374,7 +359,7 @@ class TransformerScorer(RelationalScorer):
             p_text_position = p_structure_position + self.enable_relation_text
 
             # transform the sp pairs
-            out = self.encoder.forward(torch.nn.functional.dropout(
+            out = self.encoder.forward(inputs_embeds=torch.nn.functional.dropout(
                 torch.cat((
                     torch.cat(
                         [x for x in
@@ -414,8 +399,8 @@ class TransformerScorer(RelationalScorer):
                          if x is not None],
                         dim=0,
                     )
-                ), dim=1), self.embedding_dropout, training=self.training),
-                src_key_padding_mask=torch.cat((
+                ), dim=1), self.embedding_dropout, training=self.training).transpose(0, 1),
+                attention_mask=torch.cat((
                     ~torch.cat([x for x in (
                         torch.ones(batch_size, 1 + self.enable_entity_structure, dtype=torch.bool, device=device),
                         s_attention_mask.to(device) if self.enable_entity_text else None,
@@ -432,6 +417,7 @@ class TransformerScorer(RelationalScorer):
                 ), dim=0)
             )  # SxNxE = 3 x batch_size x emb_size
 
+            out = out[0].transpose(1, 0)
 
             if self.training:
                 if self.enable_entity_structure and (s_dropout.any() or o_dropout.any()):

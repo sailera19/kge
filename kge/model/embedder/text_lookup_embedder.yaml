@@ -85,6 +85,11 @@ text_lookup_embedder:
 
   text_source: entities
   include_relation_texts: False
+
+
+  # empty string for no pretrained model
+  from_huggingface_pretrained: ""
+
   # empty string for no pretrained tokenizer
   tokenizer_from_pretrained: ""
   tokenizer_model: BPE

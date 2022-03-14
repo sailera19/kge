@@ -6,6 +6,7 @@ import: [lookup_embedder, text_lookup_embedder, shared_text_lookup_embedder]
 
 transformer:
   class_name: Transformer
+  pretrained_name: bert-base-uncased
   entity_embedder:
     type: lookup_embedder
     +++: +++
