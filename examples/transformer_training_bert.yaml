@@ -90,7 +90,7 @@ train:
   optimizer: Adamax
   optimizer_args:
     lr: 0.001
-  batch_size: 128
+  batch_size: 256
   max_epochs: 500
   loss: kl
   type: 1vsBatch
@@ -128,21 +128,24 @@ negative_sampling:
     smoothing: 0
 
 transformer:
+  encoder:
+    num_layers: 2
+    nhead: 2
   entity_embedder:
     type: text_lookup_embedder
     initialize: xavier_normal_
     dim: 128
-    dropout: 0.
+    dropout: 0.6
     from_huggingface_pretrained: google/bert_uncased_L-2_H-128_A-2
   relation_embedder:
     type: shared_text_lookup_embedder
     initialize: xavier_normal_
     dim: 128
-    dropout: 0.
+    dropout: 0.6
   text_embedder:
     initialize: xavier_normal_
     dim: 128
-    dropout: 0.
+    dropout: 0.6
 
 valid:
   early_stopping:
