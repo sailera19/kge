@@ -87,10 +87,10 @@ reciprocal_relations_model.base_model:
 
 
 train:
-  optimizer: Adam
+  optimizer: AdamW
   optimizer_args:
     lr: 0.001
-  batch_size: 256
+  batch_size: 128
   max_epochs: 500
   loss: kl
   type: 1vsBatch
@@ -99,7 +99,7 @@ train:
     mode: max
     patience: 2
     factor: 0.5
-  lr_warmup: 50
+  lr_warmup: 2
 
 negative_sampling:
   shared: True
@@ -111,8 +111,8 @@ negative_sampling:
 1vsBatch:
   num_samples: 150
   self_pred_loss:
-    factor_type: decreasing
-    factor: 0.8
+    factor_type: fixed
+    factor: 0.
     max_epoch: 400
     smoothing: 0
 
@@ -139,6 +139,6 @@ valid:
   every: 5
   metric: mean_reciprocal_rank_filtered_with_test
 
-eval.batch_size: 1024
+eval.batch_size: 128
 # eval.batch_size: 100000
 entity_ranking.chunk_size: 128

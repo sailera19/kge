@@ -5,6 +5,7 @@ import re
 from operator import or_
 from functools import reduce
 from .bert_optim import Adamax
+from transformers.optimization import AdamW
 
 
 class KgeOptimizer:
@@ -18,6 +19,8 @@ class KgeOptimizer:
             optimizer = getattr(torch.optim, name)
             if name == "Adamax":
                 optimizer = Adamax
+            if name == "AdamW":
+                optimizer = AdamW
             return optimizer(
                 KgeOptimizer._get_parameters_and_optimizer_args(config, model),
                 **config.get("train.optimizer.default.args"),
