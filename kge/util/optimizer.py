@@ -6,6 +6,7 @@ from operator import or_
 from functools import reduce
 from .bert_optim import Adamax
 from transformers.optimization import AdamW
+from transformers.optimization import get_linear_schedule_with_warmup
 
 
 class KgeOptimizer:
@@ -139,6 +140,19 @@ class KgeLRScheduler(Configurable):
                             "Error: {}"
                         ).format(name, args, e)
                     )
+
+            if name == "huggingfacelinear":
+                try:
+                    self._lr_scheduler = get_linear_schedule_with_warmup(optimizer=optimizer, **args)
+                    return
+                except Exception as e:
+                    raise ValueError(
+                        (
+                            "Invalid LR scheduler {} or scheduler arguments {}. "
+                            "Error: {}"
+                        ).format(name, args, e)
+                    )
+
 
             # create the scheduler
             try:

@@ -471,6 +471,7 @@ class TrainingJob(TrainingOrEvaluationJob):
             batch_optimizer_time = -time.time()
             if not self.is_forward_only:
                 self.optimizer.step()
+                self.kge_lr_scheduler.step()
             batch_optimizer_time += time.time()
 
             # update batch trace with the results

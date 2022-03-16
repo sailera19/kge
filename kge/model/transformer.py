@@ -155,8 +155,10 @@ class TransformerScorer(RelationalScorer):
                 )
                 dropout = 0.0
 
-        self.encoder = BertModel.from_pretrained(self.pretrained_name)
+
+        self.model = BertModel.from_pretrained(self.pretrained_name)
         self.tokenizer = BertTokenizer.from_pretrained(self.pretrained_name)
+
         self.seperator_emb = torch.nn.parameter.Parameter(self.encoder.embeddings.word_embeddings(torch.LongTensor([self.tokenizer.sep_token_id])))
         self.mlm_mask_emb = torch.nn.parameter.Parameter(self.encoder.embeddings.word_embeddings(torch.LongTensor([self.tokenizer.mask_token_id])))
         print("done")
@@ -169,12 +171,14 @@ class TransformerScorer(RelationalScorer):
     def _initialize_text_embedders(self):
         if isinstance(self.s_embedder, TextLookupEmbedder):
             self._text_embedder = self.s_embedder
-            self.text_pos_embeddings = torch.nn.Parameter(self.encoder.embeddings.position_embeddings.weight[:self._text_embedder.max_token_length])
+            self.text_pos_embeddings = torch.zeros((self._text_embedder.max_token_length, self.emb_dim), device=self.mlm_mask_emb.device)
+            # torch.nn.Parameter(self.encoder.embeddings.position_embeddings.weight[:self._text_embedder.max_token_length])
             self.initialize(self.text_pos_embeddings)
         if isinstance(self.p_embedder, TextLookupEmbedder) or isinstance(self.p_embedder, SharedTextLookupEmbedder):
             self._relation_text_embedder = self.p_embedder
-            self.rel_text_pos_embeddings = torch.nn.Parameter(
-                self.encoder.embeddings.position_embeddings.weight[:self._relation_text_embedder.max_token_length])
+            self.rel_text_pos_embeddings =  torch.zeros((self._relation_text_embedder.max_token_length, self.emb_dim), device=self.mlm_mask_emb.device)
+            # torch.nn.Parameter(
+            # self.encoder.embeddings.position_embeddings.weight[:self._relation_text_embedder.max_token_length])
             self.initialize(self.rel_text_pos_embeddings)
 
     def score_emb(self, s_emb, p_emb, o_emb, combine: str, ground_truth_s: Tensor, ground_truth_p: Tensor, ground_truth_o: Tensor, targets_o: Tensor=None, **kwargs):

@@ -5,7 +5,7 @@ import: [transformer]
 model: reciprocal_relations_model
 reciprocal_relations_model.base_model:
   type: transformer
-  pretrained_name: google/bert_uncased_L-4_H-256_A-4
+  pretrained_name: google/bert_uncased_L-2_H-128_A-2
 
   self_pred_loss_weighing: by_count
   s_dropout: 0.05
@@ -87,7 +87,7 @@ reciprocal_relations_model.base_model:
 
 
 train:
-  optimizer: AdamW
+  optimizer: Adamax
   optimizer_args:
     lr: 0.001
   batch_size: 128
@@ -99,7 +99,18 @@ train:
     mode: max
     patience: 2
     factor: 0.5
-  lr_warmup: 2
+  lr_warmup: 50
+
+#  batch_size: 32
+#  max_epochs: 500
+#  loss: kl
+#  type: 1vsBatch
+#  lr_scheduler: huggingfacelinear
+#  lr_scheduler_args:
+#    num_warmup_steps: 10000
+#    num_training_steps: 1000000
+#
+#  lr_warmup: 0
 
 negative_sampling:
   shared: True
@@ -120,18 +131,18 @@ transformer:
   entity_embedder:
     type: text_lookup_embedder
     initialize: xavier_normal_
-    dim: 256
-    dropout: 0.6
-    from_huggingface_pretrained: google/bert_uncased_L-4_H-256_A-4
+    dim: 128
+    dropout: 0.
+    from_huggingface_pretrained: google/bert_uncased_L-2_H-128_A-2
   relation_embedder:
     type: shared_text_lookup_embedder
     initialize: xavier_normal_
-    dim: 256
-    dropout: 0.6
+    dim: 128
+    dropout: 0.
   text_embedder:
     initialize: xavier_normal_
-    dim: 256
-    dropout: 0.6
+    dim: 128
+    dropout: 0.
 
 valid:
   early_stopping:
