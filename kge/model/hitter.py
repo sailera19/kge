@@ -186,7 +186,7 @@ class HitterScorer(RelationalScorer):
         self.o_embedder = o_embedder
 
     def score_emb(
-            self, s_emb: Tensor, p_emb: Tensor, o_emb: Tensor, combine: str, ground_truth_s: Tensor, ground_truth_p: Tensor, ground_truth_o: Tensor,
+            self, s_emb: Tensor, p_emb: Tensor, o_emb: Tensor, combine: str, ground_truth_s: Tensor, ground_truth_p: Tensor, ground_truth_o: Tensor, **kwargs
     ):
         """
 

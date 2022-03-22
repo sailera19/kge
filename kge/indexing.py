@@ -379,7 +379,7 @@ def index_neighbor(dataset):
                 continue
             suc = list(G.successors(s))
             pre = list(G.predecessors(s))
-            suc_edge_types = [G.get_edge_data(s, v)['type'] + dataset.num_relations() for v in suc]
+            suc_edge_types = [G.get_edge_data(s, v)['type'] + (dataset.num_relations() / 2) for v in suc]
             pre_edge_types = [G.get_edge_data(v, s)['type'] for v in pre]
             rand_permut = rng.permutation(len(suc) + len(pre))
             neighbor = np.asarray(suc + pre)[rand_permut]
