@@ -2,6 +2,7 @@ import time
 
 import torch
 import torch.utils.data
+from typing import Dict, Any
 
 from kge.job import Job
 from kge.job.train import TrainingJob, _generate_worker_init_fn
@@ -20,6 +21,9 @@ class TrainingJobNothing(TrainingJob):
         if self.__class__ == TrainingJobNothing:
             for f in Job.job_created_hooks:
                 f(self)
+
+    def run_epoch(self) -> Dict[str, Any]:
+        return {}
 
     def _prepare(self):
         """Construct dataloader"""
